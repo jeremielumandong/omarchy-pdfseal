@@ -1,0 +1,5 @@
+/native/target/
+/bin/
+/release/
+__pycache__/
+*.pyc
