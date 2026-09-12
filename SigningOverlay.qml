@@ -3,6 +3,8 @@ import QtQuick
 Item {
     id:root
     required property var document
+    property var pageData:document.page
+    signal pageActivated(int number)
     readonly property var signing:document.signing
     property var draft:null
     enabled:!document.busy
@@ -13,14 +15,14 @@ Item {
         anchors.fill:parent;enabled:root.signing.mode==="prepare"
         property real startX:0;property real startY:0
         cursorShape:Qt.CrossCursor
-        onPressed:function(mouse){root.forceActiveFocus();startX=Math.max(0,Math.min(1,mouse.x/width));startY=Math.max(0,Math.min(1,mouse.y/height));root.draft={x:startX,y:startY,w:0,h:0};}
+        onPressed:function(mouse){root.pageActivated(root.pageData.number);root.forceActiveFocus();startX=Math.max(0,Math.min(1,mouse.x/width));startY=Math.max(0,Math.min(1,mouse.y/height));root.draft={x:startX,y:startY,w:0,h:0};}
         onPositionChanged:function(mouse){if(pressed){var x=Math.max(0,Math.min(1,mouse.x/width)),y=Math.max(0,Math.min(1,mouse.y/height));root.draft={x:Math.min(x,startX),y:Math.min(y,startY),w:Math.abs(x-startX),h:Math.abs(y-startY)};}}
         onReleased:{var d=root.draft;if(d && d.w>0.01 && d.h>0.01)root.signing.addField(d.x,d.y,d.w,d.h);root.draft=null;}
         onCanceled:root.draft=null
     }
     Rectangle{visible:root.draft!==null;x:root.draft ? root.draft.x*root.width : 0;y:root.draft ? root.draft.y*root.height : 0;width:root.draft ? root.draft.w*root.width : 0;height:root.draft ? root.draft.h*root.height : 0;color:"#335a99dd";border.color:"#4279c2"}
     Repeater {
-        model:root.document.page ? root.signing.fields.filter(function(f){return f.page===root.document.page.number-1;}) : []
+        model:root.pageData ? root.signing.fields.filter(function(f){return f.page===root.pageData.number-1;}) : []
         delegate:Rectangle {
             id:field
             objectName:"signingField-"+modelData.id
@@ -38,7 +40,7 @@ Item {
                 preventStealing:true
                 anchors.fill:parent
                 property real startX:0;property real startY:0
-                onPressed:function(mouse){root.forceActiveFocus();root.signing.selectedId=field.modelData.id;var p=mapToItem(root,mouse.x,mouse.y);startX=p.x;startY=p.y;field.resizing=mouse.x>width-12 && mouse.y>height-12;}
+                onPressed:function(mouse){root.pageActivated(root.pageData.number);root.forceActiveFocus();root.signing.selectedId=field.modelData.id;var p=mapToItem(root,mouse.x,mouse.y);startX=p.x;startY=p.y;field.resizing=mouse.x>width-12 && mouse.y>height-12;}
                 onPositionChanged:function(mouse){if(!pressed || root.signing.mode!=="prepare")return;var p=mapToItem(root,mouse.x,mouse.y);var f=field.modelData;field.dx=Math.max(field.resizing ? 0.01-f.wN : -f.xN,Math.min(1-f.xN-f.wN,(p.x-startX)/root.width));field.dy=Math.max(field.resizing ? 0.01-f.hN : -f.yN,Math.min(1-f.yN-f.hN,(p.y-startY)/root.height));}
                 onReleased:{if(root.signing.mode==="sign")root.signing.requestFill(field.modelData.id);else if(field.dx || field.dy){var f=field.modelData;root.signing.updateField(f.id,field.resizing ? {wN:f.wN+field.dx,hN:f.hN+field.dy} : {xN:f.xN+field.dx,yN:f.yN+field.dy});}field.dx=0;field.dy=0;field.resizing=false;}
                 onCanceled:{field.dx=0;field.dy=0;field.resizing=false;}

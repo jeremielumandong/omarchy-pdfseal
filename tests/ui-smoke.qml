@@ -9,6 +9,9 @@ ShellRoot {
     property int colorHistory: 0
     property var touches: null
     property int phase: 0
+    property bool checking:false
+    property bool readerFitted:false
+    property real previousZoom:1
     onPhaseChanged: console.log("Regression phase " + phase)
     property var focusTarget: null
     property var previousToplevel: null
@@ -102,10 +105,12 @@ ShellRoot {
         interval: 100
         repeat: true
         onTriggered: {
+            if(checking)return;checking=true;
             try {
             var doc = nativeEditor.document;
             if (doc.error) throw new Error(doc.error);
             if (phase === 0 && doc.preview && doc.operation === "") {
+                if(!readerFitted){var reader=control("pdfViewport");reader.zoomAt(Math.max(0.5,Math.min(1,(reader.height-40)/reader.layouts[0].height)),reader.width/2,0);reader.contentY=0;readerFitted=true;return;}
                 if (nativeEditor.themeBackground.toString() !== "#112233" || nativeEditor.themeForeground.toString() !== "#ddeeff")
                     throw new Error("Theme did not propagate");
                 if (nativeEditor.openOptions) throw new Error("Plain PDF showed a password prompt");
@@ -114,7 +119,7 @@ ShellRoot {
                 nativeEditor.tool = "text";
                 // Real pointer and key events: click first, then type, without a second page click.
                 var pageInput = control("pageInput");
-                if(!input)input=eventFactory.createObject(pageInput);
+                if(!input)input=eventFactory.createObject(pageInput.Window.window.contentItem);
                 click(pageInput, pageInput.width * 0.1, pageInput.height * 0.3);
                 if (!control("inlineTextEditor").activeFocus || nativeEditor.tool !== "select") throw new Error("Page click did not enter inline editing");
                 typeText("Signed");
@@ -247,8 +252,9 @@ ShellRoot {
                 phase=14;
             } else if (phase===14) {
                 var viewport=control("pdfViewport");
+                previousZoom=doc.zoom;
                 input.mouseWheel(viewport,viewport.width/2,viewport.height/2,Qt.NoButton,Qt.ControlModifier,0,120,0);
-                if (doc.zoom<=1) throw new Error("Ctrl-wheel did not zoom PDF");
+                if (doc.zoom<=previousZoom) throw new Error("Ctrl-wheel did not zoom PDF");
                 viewport.zoomAt(1,viewport.width/2,viewport.height/2);
                 touches=input.touchEvent(viewport);
                 touches.press(0,viewport,viewport.width/2-30,viewport.height/2);
@@ -263,7 +269,7 @@ ShellRoot {
                 touches.commit();
                 phase++;
             } else if (phase===17) {
-                if (doc.zoom<=1.1) throw new Error("Pinch did not zoom PDF");
+                if (doc.zoom<=1.1) throw new Error("Pinch did not zoom PDF: zoom="+doc.zoom+" active="+control("pdfPinch").active+" enabled="+control("pdfPinch").enabled);
                 var viewport=control("pdfViewport");
                 touches.release(0,viewport,viewport.width/2-100,viewport.height/2);
                 touches.release(1,viewport,viewport.width/2+100,viewport.height/2);
@@ -340,8 +346,9 @@ ShellRoot {
                 doc.exportDocument(testDir+"/tools.pdf",false,"");
                 phase=34;
             } else if (phase===34 && doc.status.startsWith("Saved ")) {
-                nativeEditor.openedPdf(testDir+"/forms.pdf");phase=35;
+                nativeEditor.openedPdf(testDir+"/forms.pdf");readerFitted=false;phase=35;
             } else if (phase===35 && doc.fileName==="forms.pdf" && doc.preview && !doc.busy) {
+                if(!readerFitted){var reader=control("pdfViewport");reader.zoomAt(Math.max(0.5,Math.min(1,doc.zoom*(reader.height-40)/reader.layouts[0].height)),reader.width/2,0);reader.contentY=0;readerFitted=true;return;}
                 if(doc.formFields.length!==6) throw new Error("Form widgets not detected");
                 var field=control("formText-FullName");click(field,20,10);input.keyClick(Qt.Key_A,Qt.ControlModifier,0);typeText("Grace Hopper");input.keyClick(Qt.Key_Return,Qt.NoModifier,0);
                 if(doc.formValues.FullName!=="Grace Hopper" || doc.undoStack.length!==1) throw new Error("Form typing was not one undoable edit");
@@ -418,7 +425,7 @@ ShellRoot {
                 console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, comments, PDF text replacement, page duplication, search, interactive form text/checkbox/radio/dropdown, recipient order, field placement, offline handoff, guided fill and digital seal, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
-            } catch(error) {console.error("FAIL phase "+phase+": "+error);stop();for(var i=0;i<nativeEditor.data.length;i++){var window=nativeEditor.data[i];if(window.contentItem && window.title!==undefined && String(window.title).endsWith("PDFSeal")){window.contentItem.children[0].grabToImage(function(result){result.saveToFile("/tmp/pdfseal-ui-failure.png");Qt.quit();});return;}}Qt.quit();}
+            } catch(error) {console.error("FAIL phase "+phase+": "+error);stop();for(var i=0;i<nativeEditor.data.length;i++){var window=nativeEditor.data[i];if(window.contentItem && window.title!==undefined && String(window.title).endsWith("PDFSeal")){window.contentItem.children[0].grabToImage(function(result){result.saveToFile("/tmp/pdfseal-ui-failure.png");Qt.quit();});return;}}Qt.quit();} finally {checking=false;}
         }
     }
 }

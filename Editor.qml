@@ -32,7 +32,7 @@ Item {
     property real textSize: 18
     property string textFont: "sans"
     readonly property bool selectedText: document.selectedMark !== null && document.selectedMark.kind === "text"
-    readonly property bool editingText: selectedText || pageCanvas.textEditing
+    readonly property bool editingText: selectedText || viewport.textEditing
     property bool compress: true
     // Public for the integration smoke test and host introspection.
     readonly property color themeBackground: Color.background
@@ -113,14 +113,14 @@ Item {
         }
     }
     function close() {
-        pageCanvas.finishText(true);
+        viewport.finishText(true);
         if (document.busy) return;
         if (document.dirty) { nextAction = "close"; confirmDiscard = true; }
         else finishClose();
     }
     function finishClose() { document.shutdown(); opened = false; }
     function choosePdf() {
-        pageCanvas.finishText(true);
+        viewport.finishText(true);
         if (document.dirty) { nextAction = "open"; confirmDiscard = true; }
         else pdfPicker.open();
     }
@@ -166,14 +166,14 @@ Item {
     }
     FloatingWindow {
         id: window
-        title: (document.dirty || pageCanvas.textDraftDirty ? "• " : "") + (document.loaded ? document.fileName + " — " : "") + "PDFSeal"
+        title: (document.dirty || viewport.textDraftDirty ? "• " : "") + (document.loaded ? document.fileName + " — " : "") + "PDFSeal"
         visible: root.opened
         implicitWidth: 1120
         implicitHeight: 800
         minimumSize: Qt.size(900, 620)
         color: Color.background
         onClosed: {
-            pageCanvas.finishText(true);
+            viewport.finishText(true);
             if (document.busy || document.dirty) {
                 root.opened = false;
                 Qt.callLater(function() {
@@ -192,7 +192,7 @@ Item {
                 if (event.modifiers & Qt.ControlModifier) {
                     if (event.key===Qt.Key_F) {root.findOptions=true;Qt.callLater(function(){findText.forceActiveFocus();});event.accepted=true;}
                     else if (event.key === Qt.Key_O) { root.choosePdf(); event.accepted = true; }
-                    else if (event.key === Qt.Key_S && document.loaded) { pageCanvas.finishText(true); root.exportOptions = true; event.accepted = true; }
+                    else if (event.key === Qt.Key_S && document.loaded) { viewport.finishText(true); root.exportOptions = true; event.accepted = true; }
                     else if (event.key === Qt.Key_Z) {
                         if (event.modifiers & Qt.ShiftModifier) document.redo(); else document.undo();
                         event.accepted = true;
@@ -215,7 +215,7 @@ Item {
                     }
                     Button {id:imagesButton;visible:!document.loaded;text:"Images → PDF";enabled:!document.busy;onClicked:newImagesPicker.open()}
                     Button { id: openButton; text: "Open PDF"; focusable: true; bordered: true; enabled: !document.busy; onClicked: root.choosePdf() }
-                    Button { id: exportButton; text: "Export PDF"; focusable: true; selected: true; enabled: document.loaded && document.operation === ""; onClicked: { pageCanvas.finishText(true); root.exportOptions = !root.exportOptions; } }
+                    Button { id: exportButton; text: "Export PDF"; focusable: true; selected: true; enabled: document.loaded && !document.busy; onClicked: { viewport.finishText(true); root.exportOptions = !root.exportOptions; } }
                     Button { id: closeButton; text: document.busy ? "Cancel operation" : "Close"; focusable: true; onClicked: document.busy ? document.cancel() : root.close() }
                 }
                 Flow {
@@ -232,7 +232,7 @@ Item {
                             focusable: true
                             enabled: !document.busy
                             onClicked: {
-                                pageCanvas.finishText(true);
+                                viewport.finishText(true);
                                 if (modelData.id === "signature") { document.error=""; root.signatureOptions=true; return; }
                                 if (modelData.id === "stamp") { document.error=""; root.stampOptions=true; return; }
                                 root.tool=modelData.id;
@@ -242,14 +242,14 @@ Item {
                         }
                     }
                     Button{visible:document.formFields.length>0;text:document.showForms ? "Hide form fields" : "Fill forms";onClicked:{document.showForms=!document.showForms;root.tool="select";}}
-                    Button{objectName:"openSigning";text:"Signing";onClicked:{pageCanvas.finishText(true);document.signing.mode=document.signing.mode || "prepare";root.tool="signing";}}
+                    Button{objectName:"openSigning";text:"Signing";onClicked:{viewport.finishText(true);document.signing.mode=document.signing.mode || "prepare";root.tool="signing";}}
                     Button {text:"Find";onClicked:{root.findOptions=!root.findOptions;if(root.findOptions)findText.forceActiveFocus();}}
-                    Button { objectName:"openDocumentTools"; text:"Tools"; enabled:!document.busy; onClicked:{pageCanvas.finishText(true);root.toolsOptions=true;} }
-                    Button { text: "Undo"; focusable: true; enabled: !document.busy && document.undoStack.length > 0; onClicked: {pageCanvas.finishText(true);document.undo();} }
-                    Button { text: "Redo"; focusable: true; enabled: !document.busy && document.redoStack.length > 0; onClicked: {pageCanvas.finishText(true);document.redo();} }
-                    Button { text: "Remove mark"; focusable: true; enabled: !document.busy && document.selected >= 0; onClicked: {pageCanvas.finishText(false);document.removeMark();} }
+                    Button { objectName:"openDocumentTools"; text:"Tools"; enabled:!document.busy; onClicked:{viewport.finishText(true);root.toolsOptions=true;} }
+                    Button { text: "Undo"; focusable: true; enabled: !document.busy && document.undoStack.length > 0; onClicked: {viewport.finishText(true);document.undo();} }
+                    Button { text: "Redo"; focusable: true; enabled: !document.busy && document.redoStack.length > 0; onClicked: {viewport.finishText(true);document.redo();} }
+                    Button { text: "Remove mark"; focusable: true; enabled: !document.busy && document.selected >= 0; onClicked: {viewport.finishText(false);document.removeMark();} }
                 }
-                SigningPanel {width:parent.width;visible:document.signing.mode!=="";document:root.document;onExportRequested:function(finalize){pageCanvas.finishText(true);if(finalize)root.finalizeOptions=true;else {exportPassword.text="";root.exportOptions=true;}}}
+                SigningPanel {width:parent.width;visible:document.signing.mode!=="";document:root.document;onExportRequested:function(finalize){viewport.finishText(true);if(finalize)root.finalizeOptions=true;else {exportPassword.text="";root.exportOptions=true;}}}
                 Row {
                     visible:root.findOptions && document.loaded
                     width:parent.width;spacing:8
@@ -296,7 +296,7 @@ Item {
                             width:parent.width
                             text:"Custom color…"
                             enabled:!document.busy
-                            onClicked:{pageCanvas.finishText(true);root.colorOptions=true;}
+                            onClicked:{viewport.finishText(true);root.colorOptions=true;}
                         }
                         Row {
                             spacing: Style.space(6)
@@ -307,10 +307,10 @@ Item {
                         Button {
                             objectName: "editSelectedText"
                             width: parent.width
-                            visible: root.selectedText && !pageCanvas.textEditing
+                            visible: root.selectedText && !viewport.textEditing
                             enabled: !document.busy
                             text: "Edit selected text"
-                            onClicked: pageCanvas.beginText(document.selected, 0, 0)
+                            onClicked: viewport.beginText(document.selected, 0, 0)
                         }
                         Button{width:parent.width;visible:document.selectedMark!==null && document.selectedMark.kind==="note";text:"Edit comment";onClicked:{root.noteTarget={index:document.selected,x:0,y:0};root.noteOptions=true;}}
                         Flow {
@@ -342,11 +342,11 @@ Item {
                             visible: root.tool === "text" || root.editingText
                             font.pixelSize: Style.font.bodySmall
                             opacity: 0.7
-                            text: pageCanvas.textEditing ? "Type on the page. Enter saves; Escape cancels." : root.selectedText ? "Double-click text to edit. Drag to move it." : "Click the page and start typing."
+                            text: viewport.textEditing ? "Type on the page. Enter saves; Escape cancels." : root.selectedText ? "Double-click text to edit. Drag to move it." : "Click the page and start typing."
                         }
                         Label{width:parent.width;visible:root.tool==="editText";text:"Click an outlined line to cover and retype it. Fonts are approximate; covered text remains in the PDF. Use Redact to remove content.";font.pixelSize:Style.font.bodySmall;opacity:0.7}
                         Button{width:parent.width;visible:root.tool==="redact";text:"Apply true redaction";onClicked:{root.toolsOptions=true;documentTools.action="redact";}}
-                        Label { text: "PAGES"; opacity: 0.6; font.pixelSize: Style.font.bodySmall }
+                        Label { text: document.loaded ? "PAGE " + (document.current + 1) + " / " + document.pages.length : "PAGES"; opacity: 0.6; font.pixelSize: Style.font.bodySmall }
                         ListView {
                             width: parent.width
                             height: Math.max(60, parent.height - y - pageActions.implicitHeight - zoomControls.implicitHeight - Style.space(25))
@@ -361,7 +361,7 @@ Item {
                                 selected: document.current === index
                                 focusable: true
                                 enabled: !document.busy
-                                onClicked: {pageCanvas.finishText(true);document.current=index;}
+                                onClicked: {viewport.finishText(true);document.current=index;}
                             }
                         }
                         Column {
@@ -370,11 +370,11 @@ Item {
                             spacing: Style.space(5)
                             Row {
                                 spacing: Style.space(5)
-                                Button { text: "↑"; enabled: !document.busy && document.current > 0; onClicked: {pageCanvas.finishText(true);document.movePage(-1);} }
-                                Button { text: "↓"; enabled: !document.busy && document.current < document.pages.length - 1; onClicked: {pageCanvas.finishText(true);document.movePage(1);} }
-                                Button { text: "Rotate"; enabled: !document.busy; onClicked: {pageCanvas.finishText(true);document.rotatePage();} }
+                                Button { text: "↑"; enabled: !document.busy && document.current > 0; onClicked: {viewport.finishText(true);document.movePage(-1);} }
+                                Button { text: "↓"; enabled: !document.busy && document.current < document.pages.length - 1; onClicked: {viewport.finishText(true);document.movePage(1);} }
+                                Button { text: "Rotate"; enabled: !document.busy; onClicked: {viewport.finishText(true);document.rotatePage();} }
                             }
-                            Button { width: parent.width; text: "Remove page"; enabled: !document.busy && document.pages.length > 1; onClicked: {pageCanvas.finishText(true);document.removePage();} }
+                            Button { width: parent.width; text: "Remove page"; enabled: !document.busy && document.pages.length > 1; onClicked: {viewport.finishText(true);document.removePage();} }
                         }
                         Row {
                             id: zoomControls
@@ -394,76 +394,25 @@ Item {
                             width: Math.min(parent.width - 60, Style.space(440))
                             horizontalAlignment: Text.AlignHCenter
                             text: document.loaded ? "Rendering page…" : "Sign a document. Keep it local.\n\nDraw signatures, add text and highlights, arrange pages, and export a PDF.\n\nOpen a PDF to begin."
-                            visible: !document.loaded || document.preview === ""
+                            visible: !document.loaded
                         }
-                        Flickable {
-                            id: viewport
-                            objectName: "pdfViewport"
-                            function zoomAt(value, px, py) {
-                                if (!document.loaded || document.busy) return;
-                                var next=Math.max(0.5,Math.min(5,value));
-                                var ratio=next/document.zoom;
-                                var pageX=(contentX+px-pageFrame.x)*ratio;
-                                var pageY=(contentY+py-pageFrame.y)*ratio;
-                                document.zoom=next;
-                                contentX=Math.max(0,Math.min(contentWidth-width,pageFrame.x+pageX-px));
-                                contentY=Math.max(0,Math.min(contentHeight-height,pageFrame.y+pageY-py));
-                            }
-                            PinchHandler {
-                                id: pdfPinch
-                                objectName: "pdfPinch"
-                                target: null
-                                enabled: document.loaded && !document.busy
-                                acceptedDevices: PointerDevice.TouchPad | PointerDevice.TouchScreen
-                                property real startingZoom: 1
-                                onActiveChanged: if (active) { pageCanvas.finishText(true); startingZoom=document.zoom; viewport.cancelFlick(); }
-                                onActiveScaleChanged: if (active) viewport.zoomAt(startingZoom*activeScale,centroid.position.x,centroid.position.y)
-                            }
-                            WheelHandler {
-                                target: null
-                                acceptedModifiers: Qt.ControlModifier
-                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                                onWheel: function(event) {
-                                    var delta=event.angleDelta.y || event.pixelDelta.y;
-                                    viewport.zoomAt(document.zoom*Math.exp(delta/600),event.x,event.y);
-                                    event.accepted=true;
-                                }
-                            }
-                            anchors.fill: parent
-                            anchors.margins: Style.space(16)
-                            clip: true
-                            visible: document.loaded && document.preview !== ""
-                            contentWidth: Math.max(width, pageFrame.width)
-                            contentHeight: Math.max(height, pageFrame.height)
-                            boundsBehavior: Flickable.StopAtBounds
-                            Item {
-                                id: pageFrame
-                                property bool sideways: document.page ? document.page.rotation % 180 !== 0 : false
-                                property real factor: document.page ? Math.min((viewport.width - 8) / (sideways ? document.page.height : document.page.width), (viewport.height - 8) / (sideways ? document.page.width : document.page.height)) * document.zoom : 1
-                                width: document.page ? (sideways ? document.page.height : document.page.width) * factor : 0
-                                height: document.page ? (sideways ? document.page.width : document.page.height) * factor : 0
-                                x: Math.max(0, (viewport.width - width) / 2)
-                                y: Math.max(0, (viewport.height - height) / 2)
-                                PageCanvas {
-                                    id: pageCanvas
-                                    anchors.centerIn: parent
-                                    width: document.page ? document.page.width * pageFrame.factor : 0
-                                    height: document.page ? document.page.height * pageFrame.factor : 0
-                                    rotation: document.page ? document.page.rotation : 0
-                                    document: root.document
-                                    tool: root.tool
-                                    inkColor: root.ink
-                                    strokeSize: root.penSize
-                                    textSize: root.textSize
-                                    textFont: root.textFont
-                                    onExistingTextEditingStarted:function(size){root.textSize=Math.round(size);root.textFont="sans";root.ink="#000000";}
-                                    onNoteRequested:function(index,x,y){root.noteTarget={index:index,x:x,y:y};root.noteOptions=true;}
-                                    previewInk:root.colorOptions ? colorPicker.hexColor : ""
-                                    onColorPicked:function(color){root.changeInk(color);root.tool=root.previousColorTool;document.status="Color "+color+" selected.";}
-                                    onColorPickCancelled:{root.tool=root.previousColorTool;document.status="Color sampling cancelled.";}
-                                    onTextEditingStarted: root.tool = "select"
-                                }
-                            }
+                        ContinuousReader {
+                            id:viewport
+                            anchors.fill:parent
+                            anchors.margins:Style.space(16)
+                            visible:document.loaded
+                            document:root.document
+                            tool:root.tool
+                            inkColor:root.ink
+                            strokeSize:root.penSize
+                            textSize:root.textSize
+                            textFont:root.textFont
+                            previewInk:root.colorOptions ? colorPicker.hexColor : ""
+                            onExistingTextEditingStarted:function(size){root.textSize=Math.round(size);root.textFont="sans";root.ink="#000000";}
+                            onNoteRequested:function(index,x,y){root.noteTarget={index:index,x:x,y:y};root.noteOptions=true;}
+                            onColorPicked:function(color){root.changeInk(color);root.tool=root.previousColorTool;document.status="Color "+color+" selected.";}
+                            onColorPickCancelled:{root.tool=root.previousColorTool;document.status="Color sampling cancelled.";}
+                            onTextEditingStarted:root.tool="select"
                         }
                     }
                 }
@@ -565,7 +514,7 @@ Item {
                 initialColor:root.ink
                 onAccepted:function(color){root.changeInk(color);root.colorOptions=false;}
                 onDismissed:root.colorOptions=false
-                onEyedropperRequested:{root.colorOptions=false;root.previousColorTool=root.tool;root.tool="eyedropper";pageCanvas.forceActiveFocus();document.status="Click a color on the PDF. Escape cancels.";}
+                onEyedropperRequested:{root.colorOptions=false;root.previousColorTool=root.tool;root.tool="eyedropper";viewport.focusPage();document.status="Click a color on the PDF. Escape cancels.";}
             }
             ToolsDialog {
                 id:documentTools

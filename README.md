@@ -154,10 +154,18 @@ The bar widget loads its editor only on first use. The Rust process starts
 when a document opens, then exits when the editor closes. PDF parsing and
 Poppler rendering happen outside the shell's UI thread.
 
-Only the current page is decoded by QML. Previews are rendered on demand,
-debounced, capped at 2600 pixels on the longest side, and cached for the most
-recent 12 page/size combinations. Returning to a cached page avoids rendering
-it again. Large or complex PDFs can still take time to parse or render.
+The reader scrolls continuously through the document, with fit-to-width sizing,
+normal wheel/touchpad scrolling, scrollbars and Page Up / Page Down. It creates
+page canvases only for the visible area and nearby pages, and renders adjacent
+previews ahead of scrolling. The sidebar follows the page in view; selecting a
+page jumps to it. Editing, forms and signing fields stay attached to their page.
+
+Previews are capped at 2600 pixels on the longest side. The UI keeps eight
+recent preview references, while the worker caches 12 rendered files. Returning
+to a cached page avoids rendering it again. Zoom retains existing previews
+while sharper ones load, and preserves the point beneath the cursor. Fast
+scrolling cancels obsolete rendering. Exports queue behind active previews.
+Large or complex PDFs can still take time to parse or render.
 
 The worker keeps a snapshot and previews in a private `pdfseal-*` directory
 under `$XDG_RUNTIME_DIR` (or the system temporary directory when unavailable).
@@ -172,6 +180,7 @@ stdin, not command-line arguments.
 cargo test --locked --manifest-path native/Cargo.toml
 bash scripts/build.sh
 bash tests/ui-smoke.sh
+bash tests/reader-smoke.sh
 python3 tests/geometry-smoke.py
 python3 tests/jobs-smoke.py
 python3 -m unittest discover -s tests -p '*_test.py'

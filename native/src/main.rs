@@ -239,8 +239,11 @@ impl Session {
                     .arg(&prefix),
                 None,
             )
-            .map_err(|e| format!("Could not start pdftoppm: {e}. Install the poppler package."))?;
+            .inspect_err(|_| {
+                let _ = fs::remove_file(&image);
+            })?;
             if !output.status.success() {
+                let _ = fs::remove_file(&image);
                 return Err(format!(
                     "Could not render this page: {}",
                     String::from_utf8_lossy(&output.stderr).trim()

@@ -5,10 +5,12 @@ import qs.Commons
 Item {
     id:root
     required property var document
+    property var pageData:document.page
+    signal pageActivated(int number)
     property bool interactive:true
     Repeater {
         id:fields
-        model:root.document.page ? root.document.formFields.filter(function(f){return f.page===root.document.page.number;}) : []
+        model:root.pageData ? root.document.formFields.filter(function(f){return f.page===root.pageData.number;}) : []
         delegate:Rectangle {
             id:field
             required property var modelData
@@ -31,7 +33,7 @@ Item {
                 textFormat:TextEdit.PlainText;wrapMode:field.modelData.multiline ? TextEdit.Wrap : TextEdit.NoWrap
                 selectByMouse:true;clip:true
                 onTextChanged:if(activeFocus)root.document.setFormValue(field.modelData.name,text)
-                onActiveFocusChanged:if(!activeFocus)root.document.finishFormEdit()
+                onActiveFocusChanged:if(activeFocus)root.pageActivated(root.pageData.number);else root.document.finishFormEdit()
                 Keys.onPressed:function(event){if((event.key===Qt.Key_Return || event.key===Qt.Key_Enter) && !field.modelData.multiline){root.forceActiveFocus();event.accepted=true;}}
             }
             Text {
@@ -48,7 +50,7 @@ Item {
             MouseArea {
                 anchors.fill:parent
                 visible:field.modelData.type==="checkbox" || field.modelData.type==="radio"
-                onClicked:{root.document.finishFormEdit();root.document.setFormValue(field.modelData.name,field.modelData.type==="checkbox" && field.value ? "" : field.modelData.onValue);root.document.finishFormEdit();}
+                onClicked:{root.pageActivated(root.pageData.number);root.document.finishFormEdit();root.document.setFormValue(field.modelData.name,field.modelData.type==="checkbox" && field.value ? "" : field.modelData.onValue);root.document.finishFormEdit();}
             }
             Controls.ComboBox {
                 objectName:"formSelect-"+field.modelData.name
@@ -60,7 +62,8 @@ Item {
                 font.family:"Nimbus Sans";font.pixelSize:Math.max(8,Math.min(18,height*0.6))
                 background:Rectangle{color:"white";border.color:"#8dabc5"}
                 contentItem:Text{text:parent.displayText;color:"#211d17";font:parent.font;verticalAlignment:Text.AlignVCenter;leftPadding:3;elide:Text.ElideRight}
-                onActivated:{root.document.finishFormEdit();root.document.setFormValue(field.modelData.name,currentValue);root.document.finishFormEdit();}
+                onActiveFocusChanged:if(activeFocus)root.pageActivated(root.pageData.number)
+                onActivated:{root.pageActivated(root.pageData.number);root.document.finishFormEdit();root.document.setFormValue(field.modelData.name,currentValue);root.document.finishFormEdit();}
             }
         }
     }

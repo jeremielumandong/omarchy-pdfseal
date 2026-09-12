@@ -4,6 +4,10 @@ import qs.Commons
 Item {
     id: root
     required property var document
+    property var pageData:document.page
+    property string pagePreview:document.preview
+    readonly property bool currentPage:pageData && document.page && pageData.number===document.page.number
+    signal pageActivated(int number)
     property string tool: "ink"
     property string inkColor: "#153355"
     property real strokeSize: 2
@@ -19,8 +23,8 @@ Item {
     property real dragX: 0
     property real dragY: 0
     property bool resizing: false
-    readonly property real unit: document.page ? width / document.page.width : 1
-    readonly property bool available: document.preview !== "" && !document.busy
+    readonly property real unit: pageData ? width / pageData.width : 1
+    readonly property bool available: pagePreview !== "" && !document.busy
     signal textEditingStarted()
     signal existingTextEditingStarted(real size)
     signal noteRequested(int index,real x,real y)
@@ -54,7 +58,7 @@ Item {
         if (!available) return;
         finishText(true);
         document.selected=-1;
-        line=Object.assign({},line,{textY:Math.max(0,line.y-line.size*0.282/document.page.height)});
+        line=Object.assign({},line,{textY:Math.max(0,line.y-line.size*0.282/pageData.height)});
         textDraft={index:-1,x:line.x,y:line.textY,original:line.text,sourceLine:line};
         inlineText.text=line.text;
         existingTextEditingStarted(line.size);
@@ -66,7 +70,7 @@ Item {
         var draft = textDraft;
         var value = inlineText.text.trim();
         textDraft = null;
-        if (!save || document.busy || !document.page) return;
+        if (!save || document.busy || !pageData) return;
         if (draft.sourceLine) {document.replaceText(draft.sourceLine,value,textSize,inkColor,textFont);return;}
         if (draft.index < 0) {
             if (value) document.addMark(document.textMark(draft.x, draft.y, value, textSize, inkColor, textFont));
@@ -86,7 +90,7 @@ Item {
     function hit(x, y) {
         for (var i = document.marks.length - 1; i >= 0; --i) {
             var mark = document.marks[i];
-            if (mark.page !== document.page.number || mark.kind==="cover") continue;
+            if (mark.page !== pageData.number || mark.kind==="cover") continue;
             var box = bounds(mark);
             if (x >= box.x - 0.01 && x <= box.x + box.w + 0.01 && y >= box.y - 0.01 && y <= box.y + box.h + 0.01) return i;
         }
@@ -151,8 +155,9 @@ Item {
     Rectangle { anchors.fill: parent; color: "white" }
     Image {
         anchors.fill: parent
-        source: root.document.preview
+        source: root.pagePreview
         asynchronous: true
+        retainWhileLoading: true
         cache: false
         fillMode: Image.Stretch
     }
@@ -163,33 +168,33 @@ Item {
         onPaint: {
             var ctx = getContext("2d");
             ctx.reset();
-            if (!root.document.page) return;
-            if (root.tool==="editText" && root.document.textPage===root.document.page.number) {
+            if (!root.pageData) return;
+            if (root.tool==="editText" && root.document.textPage===root.pageData.number) {
                 ctx.strokeStyle="#4279c2";ctx.lineWidth=1;ctx.globalAlpha=0.4;
                 root.document.textLines.forEach(function(line){ctx.strokeRect(line.x*root.width,line.y*root.height,line.w*root.width,line.h*root.height);});
                 ctx.globalAlpha=1;
             }
             var hit=root.document.searchIndex>=0 ? root.document.searchHits[root.document.searchIndex] : null;
-            if (hit && hit.page===root.document.page.number) {
+            if (hit && hit.page===root.pageData.number) {
                 ctx.fillStyle="#ffcc00";ctx.globalAlpha=0.35;ctx.fillRect(hit.x*root.width,hit.y*root.height,hit.w*root.width,hit.h*root.height);ctx.globalAlpha=1;
             }
             root.document.marks.forEach(function(mark, index) {
                 if (root.textDraft && root.textDraft.index === index) return;
-                if (mark.page === root.document.page.number && mark.kind!=="redact") root.paintMark(ctx, mark, index === root.document.selected);
+                if (mark.page === root.pageData.number && mark.kind!=="redact") root.paintMark(ctx, mark, index === root.document.selected);
             });
             if (root.textDraft && root.textDraft.sourceLine) {
                 var line=root.textDraft.sourceLine;ctx.fillStyle="white";
                 ctx.fillRect(line.x*root.width-1,line.y*root.height-1,line.w*root.width+2,line.h*root.height+2);
             }
             // Redaction regions remain visibly opaque even after adding other marks.
-            root.document.marks.forEach(function(mark,index){if(mark.kind==="redact" && mark.page===root.document.page.number)root.paintMark(ctx,mark,index===root.document.selected);});
+            root.document.marks.forEach(function(mark,index){if(mark.kind==="redact" && mark.page===root.pageData.number)root.paintMark(ctx,mark,index===root.document.selected);});
             if (root.draft) root.paintMark(ctx, root.draft, false);
 
         }
     }
     Connections {
         target: root.document
-        function onColorSampled(color) {root.colorPicked(color);}
+        function onColorSampled(color) {if(root.currentPage)root.colorPicked(color);}
         function onTextLinesChanged(){canvas.requestPaint();}
         function onSearchIndexChanged(){canvas.requestPaint();}
         function onMarksChanged() { canvas.requestPaint(); }
@@ -203,14 +208,16 @@ Item {
     onDraftChanged: canvas.requestPaint()
     onTextDraftChanged: canvas.requestPaint()
     MouseArea {
-        objectName: "pageInput"
+        objectName: root.currentPage ? "pageInput" : "pageInput-"+(root.pageData ? root.pageData.number : 0)
         anchors.fill: parent
         enabled: root.available && root.tool!=="signing"
+        preventStealing:root.tool!=="select"
         cursorShape: root.tool === "select" ? Qt.ArrowCursor : Qt.CrossCursor
         property real startX: 0
         property real startY: 0
         function position(mouse) { return [Math.max(0, Math.min(1, mouse.x / width)), Math.max(0, Math.min(1, mouse.y / height))]; }
         onPressed: function(mouse) {
+            root.pageActivated(root.pageData.number);
             root.finishText(true);
             root.forceActiveFocus();
             var p = position(mouse);
@@ -228,7 +235,7 @@ Item {
             }
             if (root.tool==="note") {root.noteRequested(-1,p[0],p[1]);return;}
             if (root.tool==="editText") {
-                if (root.document.textPage!==root.document.page.number) {root.document.ensureText();return;}
+                if (root.document.textPage!==root.pageData.number) {root.document.ensureText();return;}
                 var line=root.document.textLines.find(function(line){return p[0]>=line.x-0.004 && p[0]<=line.x+line.w+0.004 && p[1]>=line.y-0.004 && p[1]<=line.y+line.h+0.004;});
                 if(line)root.beginOriginal(line);else root.document.status="Choose a text line. Scanned pages need OCR first.";
                 return;
@@ -277,16 +284,18 @@ Item {
             }
         }
     }
-    SigningOverlay {anchors.fill:parent;document:root.document;visible:root.tool==="signing";enabled:root.available}
+    SigningOverlay {anchors.fill:parent;document:root.document;pageData:root.pageData;onPageActivated:function(number){root.pageActivated(number);};visible:root.tool==="signing";enabled:root.available}
     FormOverlay {
         anchors.fill:parent
         visible:root.document.showForms && root.document.formFields.length>0 && root.tool==="select" && !root.textEditing
         document:root.document
+        pageData:root.pageData
+        onPageActivated:function(number){root.pageActivated(number);}
         interactive:root.available
     }
     TextEdit {
         id: inlineText
-        objectName: "inlineTextEditor"
+        objectName: root.currentPage ? "inlineTextEditor" : "inlineTextEditor-"+(root.pageData ? root.pageData.number : 0)
         visible: root.textEditing
         enabled: !root.document.busy
         x: root.textDraft ? root.textDraft.x * root.width : 0

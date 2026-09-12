@@ -22,6 +22,11 @@ Item {
     property string preview: ""
     property int previewPage: 0
     property int previewPixels: 0
+    property var previews:({})
+    property var previewOrder:[]
+    property var wantedPages:[]
+    property int renderingPage:0
+    signal documentReset()
     property int serial: 0
     property string openingPath: ""
     signal passwordNeeded(string path)
@@ -286,10 +291,29 @@ Item {
             var action = pendingAction;
             pendingAction = null;
             request(action.op, action.values);
-        } else if (page && (previewPage !== page.number || previewPixels !== desiredPixels)) {
-            request("render", {page: page.number, pixels: desiredPixels});
-        } else if (page && textRequested && textPage!==page.number) request("text",{page:page.number});
+        } else if(page) {
+            var desired=[page.number].concat(wantedPages.filter(function(n){return n!==root.page.number;}));
+            if(textRequested && textPage!==page.number && previewFor(page.number)) {request("text",{page:page.number});return;}
+            for(var i=0;i<desired.length;i++) {
+                if(!previews[desired[i]+":"+desiredPixels]) {renderingPage=desired[i];request("render",{page:desired[i],pixels:desiredPixels});return;}
+            }
+        }
     }
+    function previewEntry(number){
+        var exact=previews[number+":"+desiredPixels];if(exact)return exact;
+        for(var i=previewOrder.length-1;i>=0;i--){var value=previews[previewOrder[i]];if(value && value.page===number)return value;}
+        return null;
+    }
+    function previewFor(number){var entry=previewEntry(number);return entry ? entry.url : "";}
+    function syncCurrentPreview(){var entry=page ? previewEntry(page.number) : null;preview=entry ? entry.url : "";previewPage=entry ? entry.page : 0;previewPixels=entry ? entry.pixels : 0;}
+    function requestPages(numbers){
+        numbers=numbers.slice(0,7);
+        if(wantedPages.join(",")===numbers.join(","))return;
+        wantedPages=numbers;
+        if(operation==="render" && numbers.indexOf(renderingPage)<0 && page && renderingPage!==page.number)worker.write(JSON.stringify({op:"cancel",target:serial})+"\n");
+        renderDebounce.restart();
+    }
+
     function canChangePages(){if(signing.fields.length){error="Export or clear the signing setup before changing page structure.";return false;}return true;}
     function apply(action, options) {
         if(!canChangePages())return;
@@ -313,10 +337,10 @@ Item {
     function exportDocument(path, compress, password, options) {
         finishFormEdit();
         if (!loaded || busy) return;
-        if (operation !== "") { error = "Wait for the page preview to finish, then export."; return; }
         error = "";
         status = "Exporting PDF…";
-        request("export", Object.assign({path: path, pages: pages, marks: marks, compress: compress, password: password,keepAttachments:keepAttachments,formValues:formValues,signing:signing.recipients.length ? signing.manifest() : null},options || {}));
+        pendingAction={op:"export",values:Object.assign({path: path, pages: pages, marks: marks, compress: compress, password: password,keepAttachments:keepAttachments,formValues:formValues,signing:signing.recipients.length ? signing.manifest() : null},options || {})};
+        pump();
     }
     function shutdown() {
         if (busy) return;
@@ -338,6 +362,7 @@ Item {
         }
         operation = "";
         if (!message.ok) {
+            if(message.op==="render" && message.error==="Operation cancelled"){renderingPage=0;pump();return;}
             if (message.op === "open" && message.passwordRequired) {
                 error = "";
                 status = "This PDF requires its password.";
@@ -351,6 +376,7 @@ Item {
         }
         var result = message.result;
         if (message.op === "open" || result.baked) {
+            previews={};previewOrder=[];wantedPages=[];renderingPage=0;
             revision = result.baked ? revision + 1 : 0;
             signing.hydrate(result.signing,true);
             compressionPreview = null;
@@ -366,6 +392,7 @@ Item {
             preview = "";
             previewPage = 0;
             previewPixels = 0;
+            documentReset();
             if (!result.baked) savedState = snapshot();
             status = result.baked ? "Document updated. Export a copy to save it." : "Draw a signature or choose an annotation tool.";
             if (result.baked) operationFinished(result);
@@ -375,11 +402,12 @@ Item {
             else if (result.saved) status = "Saved " + result.saved;
             operationFinished(result);
         } else if (message.op === "render") {
-            if (page && result.page === page.number && result.pixels === desiredPixels) {
-                preview = fileUrl(result.path);
-                previewPage = result.page;
-                previewPixels = result.pixels;
-            }
+            renderingPage=0;
+            var key=result.page+":"+result.pixels;
+            var next=Object.assign({},previews);next[key]={page:result.page,pixels:result.pixels,url:fileUrl(result.path)};
+            var order=previewOrder.filter(function(k){return k!==key;}).concat([key]);
+            while(order.length>8)delete next[order.shift()];
+            previews=next;previewOrder=order;syncCurrentPreview();
         } else if (message.op === "text") {
             textPage=result.page;textLines=result.lines;
         } else if (message.op === "search") {
@@ -399,10 +427,10 @@ Item {
     }
     onPageChanged: {
         selected = -1;
-        if (page && page.number !== previewPage) preview = "";
+        syncCurrentPreview();
         renderDebounce.restart();
     }
-    onDesiredPixelsChanged: renderDebounce.restart()
+    onDesiredPixelsChanged:{syncCurrentPreview();renderDebounce.restart();}
     Timer { id: renderDebounce; interval: 120; onTriggered: root.pump() }
     Process {
         id: worker
@@ -420,7 +448,7 @@ Item {
             if (root.stopping) {
                 root.pages = [];
                 root.marks = [];
-                root.preview = "";
+                root.previews={};root.previewOrder=[];root.wantedPages=[];root.preview = "";
                 root.stopped();
             } else root.error = "The PDF worker stopped. Reopen the PDF to continue.";
         }

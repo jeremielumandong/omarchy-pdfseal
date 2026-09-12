@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix="pdfseal-jobs-") as folder:
     wrappers.mkdir()
     marker = work / "render-started"
     wrapper = wrappers / "pdftoppm"
-    wrapper.write_text('#!/bin/sh\ntouch "$PDFSEAL_RENDER_MARKER"\nexec sleep 30\n')
+    wrapper.write_text('#!/bin/sh\nfor arg do last="$arg"; done\nprintf partial > "$last.png"\ntouch "$PDFSEAL_RENDER_MARKER"\nexec sleep 30\n')
     wrapper.chmod(0o700)
     runtime = work / "runtime"
     runtime.mkdir(mode=0o700)
@@ -57,6 +57,15 @@ with tempfile.TemporaryDirectory(prefix="pdfseal-jobs-") as folder:
         cancelled = response(2)
         assert not cancelled["ok"] and cancelled["error"] == "Operation cancelled", cancelled
         assert time.monotonic() - start < 2, "Cancellation did not stop the active child"
+        marker.unlink()
+        send(dict(id=4, op="render", page=1, pixels=1200))
+        deadline = time.monotonic() + 5
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert marker.exists(), "Page preview renderer never started"
+        send(dict(op="cancel", target=4))
+        assert response(4).get("error") == "Operation cancelled"
+        assert not list(runtime.glob("*/page-1-1200.png")), "Cancelled preview left a partial cache entry"
         output = work / "after-cancel.pdf"
         send(dict(id=3, op="export", path=str(output), pages=pages, marks=[]))
         assert response(3)["ok"]
