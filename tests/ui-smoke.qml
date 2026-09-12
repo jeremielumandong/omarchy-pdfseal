@@ -336,7 +336,19 @@ ShellRoot {
                 doc.exportDocument(testDir+"/tools.pdf",false,"");
                 phase=34;
             } else if (phase===34 && doc.status.startsWith("Saved ")) {
-                nativeEditor.close();phase=2;
+                nativeEditor.openedPdf(testDir+"/forms.pdf");phase=35;
+            } else if (phase===35 && doc.fileName==="forms.pdf" && doc.preview && !doc.busy) {
+                if(doc.formFields.length!==6) throw new Error("Form widgets not detected");
+                var field=control("formText-FullName");click(field,20,10);input.keyClick(Qt.Key_A,Qt.ControlModifier,0);typeText("Grace Hopper");input.keyClick(Qt.Key_Return,Qt.NoModifier,0);
+                if(doc.formValues.FullName!=="Grace Hopper" || doc.undoStack.length!==1) throw new Error("Form typing was not one undoable edit");
+                var check=doc.formFields.find(function(f){return f.name==="Agree";});click(control("form-Agree-"+check.id),5,5);
+                var radio=doc.formFields.find(function(f){return f.name==="Choice" && f.onValue==="Two";});click(control("form-Choice-"+radio.id),5,5);
+                click(control("formSelect-Select"),20,10);input.keyClick(Qt.Key_End,Qt.NoModifier,0);input.keyClick(Qt.Key_Return,Qt.NoModifier,0);
+                phase=36;
+            } else if (phase===36) {
+                if(doc.formValues.Agree!=="" || doc.formValues.Choice!=="Two" || doc.formValues.Select!=="Beta") throw new Error("Form choices did not update");
+                doc.exportDocument(testDir+"/filled-form.pdf",false,"");phase=37;
+            } else if (phase===37 && doc.status.startsWith("Saved ")) {nativeEditor.close();phase=2;
             } else if (phase === 2 && !doc.ready && !doc.loaded) {
                 input.mouseClick(widget,widget.width/2,widget.height/2,Qt.RightButton,Qt.NoModifier,0);
                 phase=20;
@@ -356,7 +368,7 @@ ShellRoot {
                     ? 'hl.dsp.focus({ workspace = ' + JSON.stringify("name:" + previousWorkspace) + ' })'
                     : "workspace name:" + previousWorkspace);
                 if (previousToplevel) previousToplevel.activate();
-                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, comments, PDF text replacement, page duplication, search, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
+                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, comments, PDF text replacement, page duplication, search, interactive form text/checkbox/radio/dropdown, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
         }

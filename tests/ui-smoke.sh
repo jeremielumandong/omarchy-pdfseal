@@ -12,6 +12,7 @@ if [[ -d "$plugin_dir/assets" ]]; then cp -a "$plugin_dir/assets" "$test_dir/"; 
 ln -s "$plugin_dir/bin" "$test_dir/bin"
 cp "$plugin_dir/tests/ui-smoke.qml" "$test_dir/shell.qml"
 python3 "$plugin_dir/tests/make-fixture.py" "$test_dir/input.pdf"
+python3 "$plugin_dir/tests/make-form-fixture.py" "$test_dir/forms.pdf"
 qpdf --encrypt test-password test-password 256 -- "$test_dir/input.pdf" "$test_dir/encrypted.pdf"
 PDFSEAL_TEST_DIR="$test_dir" timeout 35 quickshell -p "$test_dir" --no-color >"$test_dir/output.log" 2>&1
 rg -q 'PASS: PDFSeal widget' "$test_dir/output.log"

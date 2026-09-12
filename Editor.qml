@@ -22,7 +22,7 @@ Item {
     property string imageLabel: ""
     property string nextAction: ""
     property string pickedPath: ""
-    property string tool: "ink"
+    property string tool: "select"
     property string ink: "#153355"
     property real penSize: 2
     property real textSize: 18
@@ -226,6 +226,7 @@ Item {
                             }
                         }
                     }
+                    Button{visible:document.formFields.length>0;text:document.showForms ? "Hide form fields" : "Fill forms";onClicked:{document.showForms=!document.showForms;root.tool="select";}}
                     Button {text:"Find";onClicked:{root.findOptions=!root.findOptions;if(root.findOptions)findText.forceActiveFocus();}}
                     Button { objectName:"openDocumentTools"; text:"Tools"; enabled:!document.busy; onClicked:{pageCanvas.finishText(true);root.toolsOptions=true;} }
                     Button { text: "Undo"; focusable: true; enabled: !document.busy && document.undoStack.length > 0; onClicked: {pageCanvas.finishText(true);document.undo();} }

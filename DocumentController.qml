@@ -31,6 +31,10 @@ Item {
     property var pendingImage: null
     property var savedSignatures: []
     property var pendingAction: null
+    property var formFields: []
+    property var formValues: ({})
+    property string formEditName: ""
+    property bool showForms: true
     property var textLines: []
     property int textPage: 0
     property bool textRequested: false
@@ -60,8 +64,9 @@ Item {
     function fileUrl(path) {
         return "file://" + path.split("/").map(function(part) { return encodeURIComponent(part); }).join("/");
     }
-    function snapshot() { return JSON.stringify({pages: pages, marks: marks, revision: revision}); }
+    function snapshot() { return JSON.stringify({pages: pages, marks: marks, revision: revision,formValues:formValues}); }
     function remember() {
+        formEditName="";
         undoStack = undoStack.concat([snapshot()]).slice(-100);
         redoStack = [];
     }
@@ -70,6 +75,7 @@ Item {
         pages = state.pages;
         marks = state.marks;
         revision = state.revision || 0;
+        formValues=state.formValues || {};formEditName="";
         current = Math.min(current, pages.length - 1);
         selected = -1;
     }
@@ -136,6 +142,12 @@ Item {
         next[index] = Object.assign({}, mark, {w:w,h:h});
         marks = next;
     }
+    function finishFormEdit(){formEditName="";}
+    function setFormValue(name,value) {
+        if(busy || formValues[name]===value)return;
+        if(formEditName!==name){remember();formEditName=name;}
+        var next=Object.assign({},formValues);next[name]=value;formValues=next;
+    }
     function ensureText() {textRequested=true;pump();}
     function search(query) {
         if (!loaded || busy) return;
@@ -169,7 +181,7 @@ Item {
         if (!loaded || busy) return;
         error="";
         status="Sampling PDF color…";
-        pendingColor={page:page.number,pixels:desiredPixels,x:x,y:y,marks:marks};
+        pendingColor={page:page.number,pixels:desiredPixels,x:x,y:y,marks:marks,formValues:formValues};
         pump();
     }
     function prepareImage(source) {
@@ -277,7 +289,7 @@ Item {
         error = "";
         progress = 0;
         status = "Preparing document…";
-        pendingAction = {op:"apply", values:Object.assign({}, options || {}, {action:action,pages:pages,marks:marks,keepAttachments:keepAttachments})};
+        pendingAction = {op:"apply", values:Object.assign({}, options || {}, {action:action,pages:pages,marks:marks,keepAttachments:keepAttachments,formValues:formValues})};
         pump();
     }
     function acceptCompression(path) {
@@ -291,11 +303,12 @@ Item {
         status = "Cancelling…";
     }
     function exportDocument(path, compress, password) {
+        finishFormEdit();
         if (!loaded || busy) return;
         if (operation !== "") { error = "Wait for the page preview to finish, then export."; return; }
         error = "";
         status = "Exporting PDF…";
-        request("export", {path: path, pages: pages, marks: marks, compress: compress, password: password,keepAttachments:keepAttachments});
+        request("export", {path: path, pages: pages, marks: marks, compress: compress, password: password,keepAttachments:keepAttachments,formValues:formValues});
     }
     function shutdown() {
         if (busy) return;
@@ -333,6 +346,7 @@ Item {
             revision = result.baked ? revision + 1 : 0;
             compressionPreview = null;
             textPage=0;textLines=[];searchHits=[];searchIndex=-1;
+            formFields=result.forms ? result.forms.fields : [];formValues=result.forms ? result.forms.values : {};formEditName="";
             sourcePath = result.path;
             pages = result.pages.map(function(p) { p.rotation = 0; return p; });
             marks = [];

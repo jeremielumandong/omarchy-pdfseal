@@ -20,6 +20,8 @@ impl std::fmt::Display for PasswordRequired {
 impl std::error::Error for PasswordRequired {}
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+mod flat_forms;
+mod forms;
 mod images;
 mod jobs;
 mod operations;
@@ -278,28 +280,40 @@ impl Session {
             .prefix("color-")
             .tempdir_in(self.dir.path())?;
         let pixels = request["pixels"].as_u64().unwrap_or(1600).clamp(600, 2600) as u32;
-        let path = if marks.is_empty() {
+        let forms_changed = forms::detect(&self.document, &self.pages)?.iter().any(|f| {
+            request["formValues"][&f.name]
+                .as_str()
+                .is_some_and(|v| v != f.value)
+        });
+        let flat_changed = request["formValues"].as_object().is_some_and(|values| {
+            values.iter().any(|(key, value)| {
+                key.starts_with("flat#") && value.as_str().is_some_and(|s| !s.is_empty())
+            })
+        });
+        let path = if marks.is_empty() && !forms_changed && !flat_changed {
             let preview = self.render(number, pixels)?;
             PathBuf::from(preview["path"].as_str().ok_or("Missing preview")?)
         } else {
             let baked = work.path().join("sample.pdf");
-            self.export(&json!({"path":baked,"pages":[{"number":number}],"marks":marks}))?;
+            self.export(&json!({"path":baked,"pages":[{"number":number}],"marks":marks,"formValues":request["formValues"]}))?;
             let prefix = work.path().join("sample");
-            let output = Command::new("pdftoppm")
-                .args([
-                    "-f",
-                    "1",
-                    "-l",
-                    "1",
-                    "-scale-to",
-                    &pixels.to_string(),
-                    "-cropbox",
-                    "-singlefile",
-                    "-png",
-                ])
-                .arg(baked)
-                .arg(&prefix)
-                .output()?;
+            let output = jobs::run(
+                Command::new("pdftoppm")
+                    .args([
+                        "-f",
+                        "1",
+                        "-l",
+                        "1",
+                        "-scale-to",
+                        &pixels.to_string(),
+                        "-cropbox",
+                        "-singlefile",
+                        "-png",
+                    ])
+                    .arg(baked)
+                    .arg(&prefix),
+                None,
+            )?;
             if !output.status.success() {
                 return Err("Could not sample PDF color".into());
             }
@@ -337,6 +351,7 @@ impl Session {
             }
         }
         let mut doc = self.document.clone();
+        forms::fill(&mut doc, &self.pages, &request["formValues"])?;
         for page in &self.pages {
             let mut page_marks = marks
                 .iter()
@@ -651,7 +666,7 @@ fn dispatch(session: &mut Option<Session>, request: &Value) -> Result<Value> {
             next.source = fs::canonicalize(paths[0].as_str().ok_or("Invalid image path")?)?
                 .with_file_name("images.pdf");
             jobs::check()?;
-            let result = json!({"pages":next.pages,"path":next.source,"baked":true});
+            let result = json!({"pages":next.pages,"path":next.source,"baked":true,"forms":forms::metadata(&next.document,&next.pages)?});
             *session = Some(next);
             Ok(result)
         }
@@ -660,7 +675,7 @@ fn dispatch(session: &mut Option<Session>, request: &Value) -> Result<Value> {
                 required_str(request, "path")?,
                 request["password"].as_str().unwrap_or(""),
             )?;
-            let result = json!({ "pages": next.pages, "path": next.source });
+            let result = json!({ "pages": next.pages, "path": next.source, "forms":forms::metadata(&next.document,&next.pages)? });
             jobs::check()?;
             *session = Some(next);
             Ok(result)

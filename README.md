@@ -17,13 +17,13 @@ and controls. Document paper and ink retain their actual colors.
 - Rotate, reorder, remove, duplicate, extract, split, merge and crop pages.
 - Add watermarks and page numbers; convert images to PDF and export PDF pages as PNG/JPEG.
 - Preview lossless, image and Compact compression before saving or replacing the document.
-- Recognize English text locally with OCR; flatten existing forms and annotations.
+- Fill interactive text, checkbox, radio and dropdown fields, or detected flat-form boxes and underlines; flatten forms.
+- Recognize English text locally with OCR.
 - Apply content-removing redaction with verification; keep attachments only when explicitly selected.
 - Export a new PDF with optional AES-256 protection, preserving the original file.
 - Pinch or Ctrl+wheel to zoom, and follow Omarchy theme changes automatically.
 
-Certificate-based digital seals, recipient fields, handoff packages and
-interactive form filling are still being ported. Drawn and typed signatures
+Certificate-based digital seals, recipient fields, handoff packages are still being ported. Drawn and typed signatures
 are visual annotations. Office conversion is unavailable in the reference
 Privseal implementation. Text annotations support Windows-1252 characters;
 comments support Unicode.
@@ -192,3 +192,5 @@ Exported PDFs and installation backups are preserved.
 Pinch the PDF to zoom, or use Ctrl+mouse wheel. Clicking an object gives it keyboard focus: Delete or Backspace removes it, and Undo restores it. Normal PDFs open immediately; the password dialog appears only when the PDF requires a password.
 
 **Custom color…** opens a movable picker with a draggable shade area, hue slider and hex input. Choose **Eyedropper from PDF**, then click the page to match its color. The chosen color updates selected text or becomes the ink for new text and drawings; Escape cancels sampling.
+
+**Fill forms** shows interactive fields in Select mode. Text edits are grouped into one undo step. Read-only fields remain locked. When no interactive fields exist, PDFSeal detects light boxes and underlines on unrotated vector pages; this is a heuristic, so use Text for missed regions. Export keeps interactive fields editable; **Tools → Flatten forms** makes their appearances permanent.

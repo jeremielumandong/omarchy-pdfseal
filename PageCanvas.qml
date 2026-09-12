@@ -277,6 +277,12 @@ Item {
             }
         }
     }
+    FormOverlay {
+        anchors.fill:parent
+        visible:root.document.showForms && root.document.formFields.length>0 && root.tool==="select" && !root.textEditing
+        document:root.document
+        interactive:root.available
+    }
     TextEdit {
         id: inlineText
         objectName: "inlineTextEditor"

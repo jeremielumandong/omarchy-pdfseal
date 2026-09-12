@@ -323,9 +323,13 @@ pub fn apply(session: &mut Session, request: &Value) -> Result<Value> {
                 json!({"inputFile":input,"outputFile":output,"pages":[{"file":".","range":numbers.iter().map(usize::to_string).collect::<Vec<_>>().join(",")}]}),
             )?;
         }
-        "flatten" => qpdf(
-            json!({"inputFile":input,"outputFile":output,"generateAppearances":"","flattenAnnotations":"all","removeAcroform":""}),
-        )?,
+        "flatten" => {
+            forms::prepare_flatten(&mut doc, &pages)?;
+            doc.save(&input)?;
+            qpdf(
+                json!({"inputFile":input,"outputFile":output,"generateAppearances":"","flattenAnnotations":"all","removeAcroform":""}),
+            )?;
+        }
         "compress" => {
             match request["preset"].as_str().unwrap_or("lossless") {
                 "compact" => compact(&input, &output, work.path(), &pages)?,
@@ -384,7 +388,7 @@ pub fn adopt(session: &mut Session, path: &Path) -> Result<Value> {
     let mut next = Session::open(path.to_str().ok_or("Invalid PDF path")?, "")?;
     next.source = session.source.clone();
     jobs::check()?;
-    let result = json!({"pages":next.pages,"path":next.source,"baked":true});
+    let result = json!({"pages":next.pages,"path":next.source,"baked":true,"forms":forms::metadata(&next.document,&next.pages)?});
     *session = next;
     Ok(result)
 }

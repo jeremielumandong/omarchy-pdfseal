@@ -45,6 +45,29 @@ pub fn rebuild(
             300,
             false,
         )?;
+        // Viewer annotations and form appearances can paint above page content.
+        // Enforce regions on the final raster after every PDF layer.
+        {
+            let mut pixels = images::decode(image.to_str().ok_or("Invalid raster path")?)?;
+            let (width, height) = pixels.dimensions();
+            for mark in marks
+                .iter()
+                .filter(|m| m.page == *number && m.kind == "redact")
+            {
+                let left = (mark.x * width as f32).floor().max(0.) as u32;
+                let top = (mark.y * height as f32).floor().max(0.) as u32;
+                let right = ((mark.x + mark.w) * width as f32).ceil().min(width as f32) as u32;
+                let bottom = ((mark.y + mark.h) * height as f32)
+                    .ceil()
+                    .min(height as f32) as u32;
+                for y in top..bottom {
+                    for x in left..right {
+                        pixels.put_pixel(x, y, image::Rgba([0, 0, 0, 255]));
+                    }
+                }
+            }
+            pixels.save(&image)?;
+        }
         let parent = doc
             .get_dictionary(page.id)?
             .get(b"Parent")?
@@ -115,7 +138,9 @@ mod tests {
         let original = fs::read(&source).unwrap();
         let lines = text::lines(&session, 1).unwrap();
         let line = &lines["lines"][0];
-        let mut marks = vec![];
+        let mut marks = vec![
+            json!({"kind":"note","page":1,"color":"#efcb43","size":1,"x":0.2,"y":0.3,"text":"Secret annotation"}),
+        ];
         for number in 1..=2 {
             marks.push(json!({"page":number,"kind":"redact","color":"#000000","size":1,"x":0,"y":0,"w":1,"h":1}));
         }
@@ -130,6 +155,14 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&text.stdout).trim().is_empty());
+        let raster = operations::raster(&output, 2, &dir.path().join("check"), 72, false).unwrap();
+        let pixels = images::decode(raster.to_str().unwrap()).unwrap();
+        assert!(
+            pixels
+                .pixels()
+                .all(|pixel| pixel[0] < 5 && pixel[1] < 5 && pixel[2] < 5),
+            "An annotation appeared above the redaction"
+        );
         let doc = Document::load(&output).unwrap();
         for id in doc.get_pages().values() {
             assert!(!doc.get_dictionary(*id).unwrap().has(b"Annots"));

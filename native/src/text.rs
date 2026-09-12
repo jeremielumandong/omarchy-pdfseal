@@ -43,7 +43,7 @@ pub fn lines(session: &Session, number: usize) -> Result<Value> {
     };
     let width = value(page, "width")?;
     let height = value(page, "height")?;
-    let mut grouped: Vec<(String, f32, f32, f32, f32)> = vec![];
+    let mut grouped: Vec<(String, f32, f32, f32, f32, bool)> = vec![];
     for node in page.descendants().filter(|node| node.has_tag_name("word")) {
         let text = node.text().unwrap_or("");
         if text.trim().is_empty() {
@@ -59,10 +59,15 @@ pub fn lines(session: &Session, number: usize) -> Result<Value> {
             && (((y - last.2).abs() < 1.5
                 && ((x >= last.3 - 1. && x - last.3 < (bottom - y) * 2.)
                     || (right <= last.1 + 1. && last.1 - right < (bottom - y) * 2.)))
-                || ((x - last.1).abs() < 1.5
+                || (last.5
+                    && bottom - y > (right - x) * 1.5
+                    && (x - last.1).abs() < 1.5
                     && ((y >= last.4 - 1. && y - last.4 < (right - x) * 2.)
                         || (bottom <= last.2 + 1. && last.2 - bottom < (right - x) * 2.))))
         {
+            if (y - last.2).abs() < 1.5 {
+                last.5 = false;
+            }
             last.0.push(' ');
             last.0.push_str(text);
             last.1 = last.1.min(x);
@@ -70,10 +75,17 @@ pub fn lines(session: &Session, number: usize) -> Result<Value> {
             last.3 = last.3.max(right);
             last.4 = last.4.max(bottom);
         } else {
-            grouped.push((text.to_string(), x, y, right, bottom));
+            grouped.push((
+                text.to_string(),
+                x,
+                y,
+                right,
+                bottom,
+                bottom - y > (right - x) * 1.5,
+            ));
         }
     }
-    let lines=grouped.into_iter().map(|(text,x,y,right,bottom)|json!({"text":text,"x":(x/width).clamp(0.,1.),"y":(y/height).clamp(0.,1.),
+    let lines=grouped.into_iter().map(|(text,x,y,right,bottom,_)|json!({"text":text,"x":(x/width).clamp(0.,1.),"y":(y/height).clamp(0.,1.),
         "w":((right-x)/width).clamp(0.,1.),"h":((bottom-y)/height).clamp(0.,1.),"size":((bottom-y)/0.925).clamp(8.,72.)})).collect::<Vec<_>>();
     let result = json!({"page":number,"lines":lines});
     fs::write(cache, serde_json::to_vec(&result)?)?;
