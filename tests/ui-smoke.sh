@@ -13,6 +13,7 @@ cp "$plugin_dir/tests/ui-smoke.qml" "$test_dir/shell.qml"
 python3 "$plugin_dir/tests/make-fixture.py" "$test_dir/input.pdf"
 PDFSEAL_TEST_DIR="$test_dir" timeout 20 quickshell -p "$test_dir" --no-color >"$test_dir/output.log" 2>&1
 rg -q 'PASS: PDFSeal widget' "$test_dir/output.log"
+pdftotext "$test_dir/signed.pdf" - | rg -q 'Updated text'
 if rg 'ERROR|TypeError|ReferenceError|Cannot assign|Cannot open:' "$test_dir/output.log"; then
     exit 1
 fi

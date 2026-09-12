@@ -12,7 +12,11 @@
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "right",
-    "defaults": { "showLabel": true },
-    "schema": [{ "key": "showLabel", "type": "boolean", "label": "Show PDFSeal label" }]
+    "defaults": { "displayMode": "both" },
+    "schema": [{
+      "key": "displayMode", "type": "enum", "label": "Bar display",
+      "description": "both: icon and text; icon: icon only; text: text only. Right-click the widget to cycle.",
+      "options": ["both", "icon", "text"], "defaultValue": "both"
+    }]
   }
 }

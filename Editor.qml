@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Dialogs
 import Quickshell
+import Quickshell.Hyprland
 import qs.Commons
 import qs.Ui
 
@@ -15,12 +16,78 @@ Item {
     property string tool: "ink"
     property string ink: "#153355"
     property real penSize: 2
+    property real textSize: 18
+    property var pendingTextPosition: null
+    readonly property bool editingText: document.selectedMark !== null && document.selectedMark.kind === "text"
     property bool compress: true
     // Public for the integration smoke test and host introspection.
     readonly property color themeBackground: Color.background
     readonly property color themeForeground: Color.foreground
     property alias document: document
-    function open() { opened = true; }
+    function activateWindow() {
+        var windows = Hyprland.toplevels.values;
+        for (var i = 0; i < windows.length; ++i) {
+            var target = windows[i];
+            if (target.title === window.title && target.wayland && target.wayland.appId === "org.quickshell") {
+                target.wayland.minimized = false;
+                // Foreign-toplevel activation can be ignored when focus_on_activate
+                // is disabled. A bar click explicitly asks Hyprland to focus it.
+                var address = "address:0x" + target.address;
+                Hyprland.dispatch(Hyprland.usingLua
+                    ? 'hl.dsp.focus({ window = "' + address + '" })'
+                    : "focuswindow " + address);
+                return true;
+            }
+        }
+        return false;
+    }
+    function open() {
+        opened = true;
+        if (!activateWindow()) {
+            activation.attempts = 0;
+            activation.restart();
+        }
+    }
+    Timer {
+        id: activation
+        property int attempts: 0
+        interval: 50
+        repeat: true
+        onTriggered: if (!root.opened || root.activateWindow() || ++attempts >= 20) stop()
+    }
+    function placeText(x, y) {
+        if (document.busy || !document.page) return;
+        document.selected = -1;
+        pendingTextPosition = {x: x, y: y};
+        editText(annotationText.text);
+        annotationText.forceActiveFocus();
+        annotationText.selectAll();
+    }
+    function editText(text) {
+        if (document.busy) return;
+        if (editingText) document.updateSelectedText(text, textSize);
+        else if (pendingTextPosition && text.trim()) {
+            var position = pendingTextPosition;
+            pendingTextPosition = null;
+            document.addMark(document.textMark(position.x, position.y, text, textSize, ink));
+        }
+    }
+    function changeTextSize(delta) {
+        textSize = Math.max(8, Math.min(72, textSize + delta));
+        if (editingText) document.updateSelectedText(annotationText.text, textSize);
+    }
+    onToolChanged: pendingTextPosition = null
+    Connections {
+        target: document
+        function onPageChanged() { root.pendingTextPosition = null; }
+        function onSelectedMarkChanged() {
+            if (!root.editingText) return;
+            root.pendingTextPosition = null;
+            var mark = document.selectedMark;
+            if (annotationText.text !== mark.text) annotationText.text = mark.text;
+            root.textSize = mark.size;
+        }
+    }
     function close() {
         if (document.busy) return;
         if (document.dirty) { nextAction = "close"; confirmDiscard = true; }
@@ -115,7 +182,7 @@ Item {
                     Button { id: exportButton; text: "Export PDF"; focusable: true; selected: true; enabled: document.loaded && document.operation === ""; onClicked: root.exportOptions = !root.exportOptions }
                     Button { id: closeButton; text: "Close"; focusable: true; enabled: !document.busy; onClicked: root.close() }
                 }
-                Row {
+                Flow {
                     width: parent.width
                     visible: document.loaded
                     spacing: Style.space(6)
@@ -174,17 +241,28 @@ Item {
                         }
                         TextField {
                             id: annotationText
+                            objectName: "annotationText"
                             width: parent.width
-                            visible: root.tool === "text"
+                            visible: root.tool === "text" || root.editingText
+                            enabled: !document.busy
                             placeholderText: "Text to place"
                             maximumLength: 160
+                            onTextEdited: root.editText(text)
                         }
                         Row {
-                            visible: root.tool === "text"
+                            visible: annotationText.visible
+                            enabled: !document.busy
                             spacing: Style.space(6)
-                            Button { text: "A−"; onClicked: pageCanvas.textSize = Math.max(8, pageCanvas.textSize - 2) }
-                            Label { text: pageCanvas.textSize + " pt"; anchors.verticalCenter: parent.verticalCenter }
-                            Button { text: "A+"; onClicked: pageCanvas.textSize = Math.min(72, pageCanvas.textSize + 2) }
+                            Button { objectName: "decreaseTextSize"; text: "A−"; onClicked: root.changeTextSize(-2) }
+                            Label { text: root.textSize + " pt"; anchors.verticalCenter: parent.verticalCenter }
+                            Button { objectName: "increaseTextSize"; text: "A+"; onClicked: root.changeTextSize(2) }
+                        }
+                        Label {
+                            width: parent.width
+                            visible: annotationText.visible
+                            font.pixelSize: Style.font.bodySmall
+                            opacity: 0.7
+                            text: root.editingText ? "Edit the selected text or change its size." : root.pendingTextPosition ? "Type to add text at the clicked position." : "Click the page to place text."
                         }
                         Label { text: "PAGES"; opacity: 0.6; font.pixelSize: Style.font.bodySmall }
                         ListView {
@@ -263,8 +341,8 @@ Item {
                                     tool: root.tool
                                     inkColor: root.ink
                                     strokeSize: root.penSize
-                                    textValue: annotationText.text
-                                    onTextNeeded: annotationText.forceActiveFocus()
+                                    onTextPlacementRequested: function(x, y) { root.placeText(x, y); }
+                                    onTextSelected: { annotationText.forceActiveFocus(); annotationText.selectAll(); }
                                 }
                             }
                         }

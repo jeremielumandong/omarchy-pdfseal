@@ -7,14 +7,13 @@ Item {
     property string tool: "ink"
     property string inkColor: "#153355"
     property real strokeSize: 2
-    property string textValue: ""
-    property real textSize: 18
     property var draft: null
     property real dragX: 0
     property real dragY: 0
     readonly property real unit: document.page ? width / document.page.width : 1
     readonly property bool available: document.preview !== "" && !document.busy
-    signal textNeeded()
+    signal textPlacementRequested(real x, real y)
+    signal textSelected()
 
     function bounds(mark) {
         if (mark.kind !== "ink") return {x: mark.x, y: mark.y, w: mark.w || 0.15, h: mark.h || 0.04};
@@ -58,7 +57,7 @@ Item {
             ctx.fillRect(mark.x * width, mark.y * height, mark.w * width, mark.h * height);
         } else ctx.strokeRect(mark.x * width, mark.y * height, mark.w * width, mark.h * height);
         ctx.restore();
-        if (selected && root.tool === "select") {
+        if (selected && (root.tool === "select" || (root.tool === "text" && mark.kind === "text"))) {
             var b = bounds(mark);
             ctx.save();
             ctx.strokeStyle = "#4279c2";
@@ -100,6 +99,7 @@ Item {
     onToolChanged: canvas.requestPaint()
     onDraftChanged: canvas.requestPaint()
     MouseArea {
+        objectName: "pageInput"
         anchors.fill: parent
         enabled: root.available
         cursorShape: root.tool === "select" ? Qt.ArrowCursor : Qt.CrossCursor
@@ -114,12 +114,11 @@ Item {
                 return;
             }
             if (root.tool === "text") {
-                if (!root.textValue.trim()) { root.textNeeded(); return; }
-                root.document.addMark({
-                    kind: "text", color: root.inkColor, size: root.textSize, text: root.textValue,
-                    x: p[0], y: p[1], w: Math.min(1 - p[0], root.textValue.length * root.textSize * 0.56 / root.document.page.width),
-                    h: Math.min(1 - p[1], root.textSize * 1.3 / root.document.page.height)
-                });
+                var index = root.hit(p[0], p[1]);
+                if (index >= 0 && root.document.marks[index].kind === "text") {
+                    root.document.selected = index;
+                    root.textSelected();
+                } else root.textPlacementRequested(p[0], p[1]);
                 return;
             }
             root.draft = {kind: root.tool, color: root.inkColor, size: root.strokeSize,

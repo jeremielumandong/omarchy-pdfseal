@@ -54,6 +54,13 @@ up under `$XDG_STATE_HOME/omarchy-pdfseal/backups`.
 
 Click **PDFSeal** in the bar or application launcher. Open a PDF, select a
 tool, and draw or click on the page. **Select** lets you drag an existing mark.
+Clicking the bar button again focuses the existing editor, including from
+another workspace, while keeping your document and edits open.
+
+For text, choose **Text**, click where it belongs, then type in the sidebar.
+Click existing text with **Text** or **Select** to edit it; **A− / A+** changes
+the selected text's size immediately. Text and size changes support undo/redo.
+
 **Export PDF** saves a new copy. An empty export password creates an
 unencrypted file, including when the input was encrypted.
 
@@ -63,6 +70,17 @@ Shortcuts: `Ctrl+O` open, `Ctrl+S` export, `Ctrl+Z` undo,
 ```sh
 omarchy bar move arkane.pdfseal --section right
 omarchy-shell shell summon arkane.pdfseal '{}'
+```
+
+**Right-click PDFSeal in the bar** to cycle through **Icon and text** (default),
+**Icon only**, and **Text only**. Your choice is saved in Omarchy's bar settings.
+The document/signature icon follows the bar's
+theme colors. Vertical bars use the compact icon. You can also switch with:
+
+```sh
+omarchy bar set arkane.pdfseal displayMode icon
+omarchy bar set arkane.pdfseal displayMode text
+omarchy bar set arkane.pdfseal displayMode both
 ```
 
 This source repository includes a Rust crate. `omarchy plugin add` clones
@@ -122,8 +140,9 @@ python3 -m unittest discover -s tests -p '*_test.py'
 
 Native tests cover crop/rotation geometry, preview caching, text and ink
 export, page order, encryption, original-file preservation and cleanup.
-The UI smoke test needs a running Wayland session and checks a fixture PDF,
-native window lifecycle, theme bindings, editing and export.
+The UI smoke test needs a running Hyprland session and QtTest. It checks a
+fixture PDF, icon/text modes, theme bindings, real clicks and typing, text
+resizing and undo/redo, cross-workspace focus without losing edits, and export.
 
 ## Remove
 

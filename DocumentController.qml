@@ -17,6 +17,7 @@ Item {
     property var redoStack: []
     property int current: 0
     property int selected: -1
+    readonly property var selectedMark: selected >= 0 && selected < marks.length ? marks[selected] : null
     property real zoom: 1
     property string preview: ""
     property int previewPage: 0
@@ -76,6 +77,21 @@ Item {
         remember();
         marks = marks.filter(function(mark, index) { return index !== root.selected; });
         selected = -1;
+    }
+    function textMark(x, y, text, size, color) {
+        return {kind: "text", color: color, size: size, text: text, x: x, y: y,
+            w: Math.min(1 - x, Math.max(0.01, text.length * size * 0.56 / page.width)),
+            h: Math.min(1 - y, size * 1.3 / page.height)};
+    }
+    function updateSelectedText(text, size) {
+        var mark = selectedMark;
+        if (busy || !page || !mark || mark.kind !== "text" || mark.page !== page.number) return;
+        size = Math.max(8, Math.min(72, size));
+        if (mark.text === text && mark.size === size) return;
+        var next = marks.slice();
+        next[selected] = Object.assign({}, mark, textMark(mark.x, mark.y, text, size, mark.color));
+        remember();
+        marks = next;
     }
     function moveMark(index, dx, dy) {
         if (busy || index < 0 || (!dx && !dy)) return;
