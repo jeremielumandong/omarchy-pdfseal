@@ -7,7 +7,7 @@ use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use tempfile::{NamedTempFile, TempDir};
 
 #[derive(Debug)]
@@ -21,6 +21,10 @@ impl std::error::Error for PasswordRequired {}
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 mod images;
+mod jobs;
+mod operations;
+mod redaction;
+mod text;
 
 #[derive(Clone, Serialize)]
 struct Page {
@@ -63,6 +67,16 @@ struct Mark {
     image_data: String,
     #[serde(default)]
     points: Vec<[f32; 2]>,
+    #[serde(default = "full_opacity")]
+    opacity: f32,
+    #[serde(default)]
+    angle: f32,
+    #[serde(default)]
+    centered: bool,
+}
+
+fn full_opacity() -> f32 {
+    1.0
 }
 
 fn default_size() -> f32 {
@@ -80,20 +94,10 @@ struct Session {
 
 /// Arguments and passwords travel on stdin, never through a shell or process argv.
 fn qpdf(job: Value) -> Result<()> {
-    let mut child = Command::new("qpdf")
-        .arg("--job-json-file=/dev/stdin")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Could not start qpdf: {e}. Install the qpdf package."))?;
-    let write_result = child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(job.to_string().as_bytes());
-    let output = child.wait_with_output()?;
-    write_result?;
+    let output = jobs::run(
+        Command::new("qpdf").arg("--job-json-file=/dev/stdin"),
+        Some(job.to_string().as_bytes()),
+    )?;
     if !output.status.success() && output.status.code() != Some(3) {
         if String::from_utf8_lossy(&output.stderr)
             .to_lowercase()
@@ -214,25 +218,24 @@ impl Session {
         let image = prefix.with_extension("png");
         let cached = image.is_file();
         if !cached {
-            let output = Command::new("pdftoppm")
-                .args([
-                    "-f",
-                    &number.to_string(),
-                    "-l",
-                    &number.to_string(),
-                    "-scale-to",
-                    &pixels.to_string(),
-                    "-cropbox",
-                    "-singlefile",
-                    "-png",
-                ])
-                .arg(&self.snapshot)
-                .arg(&prefix)
-                .stdin(Stdio::null())
-                .output()
-                .map_err(|e| {
-                    format!("Could not start pdftoppm: {e}. Install the poppler package.")
-                })?;
+            let output = jobs::run(
+                Command::new("pdftoppm")
+                    .args([
+                        "-f",
+                        &number.to_string(),
+                        "-l",
+                        &number.to_string(),
+                        "-scale-to",
+                        &pixels.to_string(),
+                        "-cropbox",
+                        "-singlefile",
+                        "-png",
+                    ])
+                    .arg(&self.snapshot)
+                    .arg(&prefix),
+                None,
+            )
+            .map_err(|e| format!("Could not start pdftoppm: {e}. Install the poppler package."))?;
             if !output.status.success() {
                 return Err(format!(
                     "Could not render this page: {}",
@@ -335,16 +338,24 @@ impl Session {
         }
         let mut doc = self.document.clone();
         for page in &self.pages {
-            let page_marks = marks
+            let mut page_marks = marks
                 .iter()
                 .filter(|mark| mark.page == page.number)
                 .collect::<Vec<_>>();
+            page_marks.sort_by_key(|m| m.kind == "redact");
             if !page_marks.is_empty() {
                 annotate(&mut doc, page, &page_marks)?;
             }
         }
         let annotated = self.dir.path().join("annotated.pdf");
         doc.save(&annotated)?;
+        let audit = if marks.iter().any(|m| m.kind == "redact") {
+            let audit = redaction::rebuild(&mut doc, self, &annotated, &marks)?;
+            doc.save(&annotated)?;
+            Some(audit)
+        } else {
+            None
+        };
         let parent = output.parent().ok_or("Invalid export folder")?;
         let temporary = NamedTempFile::new_in(parent)?;
         let range = pages
@@ -368,12 +379,25 @@ impl Session {
             job["recompressFlate"] = json!("");
             job["compressionLevel"] = json!("9");
         }
+        if audit.is_some() {
+            job.as_object_mut().unwrap().remove("inputFile");
+            job["empty"] = json!("");
+            job["pages"][0]["file"] = json!(annotated);
+            if request["keepAttachments"].as_bool().unwrap_or(false) {
+                job["copyAttachmentsFrom"] = json!([{"file":self.snapshot}]);
+            }
+        }
         let password = request["password"].as_str().unwrap_or("");
+        if let Some(audit) = audit.as_ref() {
+            qpdf(job.clone())?;
+            redaction::verify(temporary.path(), &pages, audit)?;
+        }
         if !password.is_empty() {
             job["encrypt"] =
                 json!({ "userPassword": password, "ownerPassword": password, "256bit": {} });
         }
         qpdf(job)?;
+        jobs::check()?;
         temporary.as_file().sync_all()?;
         let bytes = temporary.as_file().metadata()?.len();
         temporary.persist(&output).map_err(|e| e.error)?;
@@ -410,13 +434,17 @@ fn op(name: &str, values: &[f32]) -> Operation {
 fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
     let mut operations = vec![];
     let mut image_resources = dictionary! {};
+    let mut opacity_resources =
+        dictionary! {"Highlight" => dictionary! {"Type"=>"ExtGState","ca"=>0.3,"BM"=>"Multiply"}};
     for mark in marks {
         let values = [mark.x, mark.y, mark.w, mark.h];
         if values
             .iter()
             .any(|v| !v.is_finite() || *v < 0.0 || *v > 1.0)
             || !mark.size.is_finite()
-            || !(0.1..=96.0).contains(&mark.size)
+            || !(0.1..=200.0).contains(&mark.size)
+            || !mark.angle.is_finite()
+            || !(0. ..=1.).contains(&mark.opacity)
             || mark
                 .points
                 .iter()
@@ -426,6 +454,15 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
             return Err("Invalid annotation coordinates".into());
         }
         operations.push(op("q", &[]));
+        let opacity_name = format!("Opacity_{}", opacity_resources.len());
+        opacity_resources.set(
+            opacity_name.as_bytes(),
+            dictionary! {"Type"=>"ExtGState","ca"=>mark.opacity,"CA"=>mark.opacity},
+        );
+        operations.push(Operation::new(
+            "gs",
+            vec![Object::Name(opacity_name.into_bytes())],
+        ));
         operations.push(Operation::new("RG", color(&mark.color)?));
         operations.push(Operation::new("rg", color(&mark.color)?));
         operations.push(op("w", &[mark.size]));
@@ -434,6 +471,27 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
         let x = mark.x * page.width;
         let y = (1.0 - mark.y) * page.height;
         match mark.kind.as_str() {
+            "note" => text::note(doc, page, mark)?,
+            "cover" | "redact" => {
+                operations.push(op(
+                    "rg",
+                    if mark.kind == "cover" {
+                        &[1., 1., 1.]
+                    } else {
+                        &[0., 0., 0.]
+                    },
+                ));
+                operations.push(op(
+                    "re",
+                    &[
+                        x,
+                        y - mark.h * page.height,
+                        mark.w * page.width,
+                        mark.h * page.height,
+                    ],
+                ));
+                operations.push(op("f", &[]));
+            }
             "image" => {
                 if mark.w <= 0.0 || mark.h <= 0.0 || !mark.image_data.starts_with("data:image/") {
                     return Err("Invalid image annotation".into());
@@ -491,10 +549,21 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
                     "" | "sans" => "Text",
                     "serif" => "Serif",
                     "mono" => "Mono",
+                    "bold" => "Bold",
                     _ => return Err("Unknown text font".into()),
                 };
                 operations.push(Operation::new("Tf", vec![font.into(), mark.size.into()]));
-                operations.push(op("Td", &[x, y - mark.size]));
+                let angle = mark.angle.to_radians();
+                let width = mark.text.chars().count() as f32 * mark.size * 0.65;
+                let (tx, ty) = if mark.centered {
+                    (x - width / 2. * angle.cos(), y - width / 2. * angle.sin())
+                } else {
+                    (x, y - mark.size)
+                };
+                operations.push(op(
+                    "Tm",
+                    &[angle.cos(), angle.sin(), -angle.sin(), angle.cos(), tx, ty],
+                ));
                 for (index, line) in encoded.split(|byte| *byte == b'\n').enumerate() {
                     if index > 0 {
                         operations.push(op("Td", &[0.0, -mark.size * 1.2]));
@@ -516,16 +585,15 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
     let mono = doc.add_object(dictionary! {
         "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier", "Encoding" => "WinAnsiEncoding"
     });
+    let bold=doc.add_object(dictionary! {"Type"=>"Font","Subtype"=>"Type1","BaseFont"=>"Helvetica-Bold","Encoding"=>"WinAnsiEncoding"});
     let form = Stream::new(
         dictionary! {
             "Type" => "XObject", "Subtype" => "Form", "FormType" => 1,
             "BBox" => vec![0.into(), 0.into(), page.width.into(), page.height.into()],
             "Resources" => dictionary! {
                 "XObject" => image_resources,
-                "Font" => dictionary! { "Text" => font, "Serif" => serif, "Mono" => mono },
-                "ExtGState" => dictionary! {
-                    "Highlight" => dictionary! { "Type" => "ExtGState", "ca" => 0.3, "BM" => "Multiply" }
-                }
+                "Font" => dictionary! { "Text" => font, "Serif" => serif, "Mono" => mono, "Bold" => bold },
+                "ExtGState" => opacity_resources
             }
         },
         Content { operations }.encode()?,
@@ -574,12 +642,26 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
 
 fn dispatch(session: &mut Option<Session>, request: &Value) -> Result<Value> {
     match required_str(request, "op")? {
+        "fromImages" => {
+            let work = tempfile::tempdir()?;
+            let output = work.path().join("images.pdf");
+            let paths = request["paths"].as_array().ok_or("Choose images")?;
+            operations::images_pdf(paths, &output)?;
+            let mut next = Session::open(output.to_str().ok_or("Invalid image path")?, "")?;
+            next.source = fs::canonicalize(paths[0].as_str().ok_or("Invalid image path")?)?
+                .with_file_name("images.pdf");
+            jobs::check()?;
+            let result = json!({"pages":next.pages,"path":next.source,"baked":true});
+            *session = Some(next);
+            Ok(result)
+        }
         "open" => {
             let next = Session::open(
                 required_str(request, "path")?,
                 request["password"].as_str().unwrap_or(""),
             )?;
             let result = json!({ "pages": next.pages, "path": next.source });
+            jobs::check()?;
             *session = Some(next);
             Ok(result)
         }
@@ -589,6 +671,18 @@ fn dispatch(session: &mut Option<Session>, request: &Value) -> Result<Value> {
         ),
         "export" => session.as_ref().ok_or("Open a PDF first")?.export(request),
         "sample" => session.as_mut().ok_or("Open a PDF first")?.sample(request),
+        "apply" => operations::apply(session.as_mut().ok_or("Open a PDF first")?, request),
+        "acceptCompression" => {
+            operations::accept_compression(session.as_mut().ok_or("Open a PDF first")?, request)
+        }
+        "text" => text::lines(
+            session.as_ref().ok_or("Open a PDF first")?,
+            request["page"].as_u64().ok_or("Choose a page")? as usize,
+        ),
+        "search" => text::search(
+            session.as_ref().ok_or("Open a PDF first")?,
+            required_str(request, "query")?,
+        ),
         "image" => images::prepare(required_str(request, "source")?),
         "close" => {
             *session = None;
@@ -609,17 +703,43 @@ fn main() -> Result<()> {
         json!({ "event": "ready", "version": env!("CARGO_PKG_VERSION") })
     );
     io::stdout().flush()?;
-    for line in io::stdin().lock().lines() {
-        let line = line?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::sync::atomic::Ordering;
+        for line in io::stdin().lock().lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            if let Ok(request) = serde_json::from_str::<Value>(&line)
+                && request["op"] == "cancel"
+            {
+                jobs::CANCELLED.store(request["target"].as_u64().unwrap_or(0), Ordering::Relaxed);
+                continue;
+            }
+            if sender.send(line).is_err() {
+                return;
+            }
+        }
+        jobs::CANCELLED.store(jobs::CURRENT.load(Ordering::Relaxed), Ordering::Relaxed);
+    });
+    for line in receiver {
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => match dispatch(&mut session, &request) {
-                Ok(result) => {
-                    json!({ "id": request["id"], "op": request["op"], "ok": true, "result": result })
+            Ok(request) => {
+                jobs::CURRENT.store(
+                    request["id"].as_u64().unwrap_or(0),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                let result = dispatch(&mut session, &request);
+                jobs::CURRENT.store(0, std::sync::atomic::Ordering::Relaxed);
+                match result {
+                    Ok(result) => {
+                        json!({ "id": request["id"], "op": request["op"], "ok": true, "result": result })
+                    }
+                    Err(error) => {
+                        json!({ "id": request["id"], "op": request["op"], "ok": false, "error": error.to_string(), "passwordRequired": error.downcast_ref::<PasswordRequired>().is_some() })
+                    }
                 }
-                Err(error) => {
-                    json!({ "id": request["id"], "op": request["op"], "ok": false, "error": error.to_string(), "passwordRequired": error.downcast_ref::<PasswordRequired>().is_some() })
-                }
-            },
+            }
             Err(_) => json!({ "ok": false, "error": "Invalid JSON request" }),
         };
         println!("{response}");
@@ -633,7 +753,7 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    fn fixture(path: &Path) {
+    pub(super) fn fixture(path: &Path) {
         let mut doc = Document::with_version("1.7");
         let pages = doc.new_object_id();
         let font = doc.add_object(

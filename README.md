@@ -10,22 +10,23 @@ and controls. Document paper and ink retain their actual colors.
 
 ## Native features
 
-- Open ordinary or password-protected PDFs.
-- Draw, type or import signatures; choose Script, Casual or Formal fonts.
-- Place approved/rejected/reviewed/draft/confidential/final and dated stamps.
-- Add text, freehand ink, highlights and outline boxes.
-- Select, move, resize and delete annotations; undo and redo.
-- View one page at a time, zoom, rotate, reorder and remove pages.
-- Export a new PDF with lossless compression and optional AES-256 password protection.
-- Preserve the original file; export refuses to overwrite it.
+- Draw, type or import signatures, with Script, Casual and Formal fonts; use eight stamp presets.
+- Add and edit text, comments, ink, highlights and boxes; move, resize, delete, undo and redo.
+- Use a draggable color picker or sample colors directly from the PDF.
+- Find text and cover/retype existing PDF text with approximate fonts.
+- Rotate, reorder, remove, duplicate, extract, split, merge and crop pages.
+- Add watermarks and page numbers; convert images to PDF and export PDF pages as PNG/JPEG.
+- Preview lossless, image and Compact compression before saving or replacing the document.
+- Recognize English text locally with OCR; flatten existing forms and annotations.
+- Apply content-removing redaction with verification; keep attachments only when explicitly selected.
+- Export a new PDF with optional AES-256 protection, preserving the original file.
+- Pinch or Ctrl+wheel to zoom, and follow Omarchy theme changes automatically.
 
-This is the first native implementation of Privseal's core signing and
-annotation workflow. It does **not** yet include certificate-based digital
-seals, recipient fields and handoff packages, OCR, true redaction,
-merging, or Office/image conversion. Drawn and typed signatures are visual
-annotations, not cryptographic signatures. Existing digital signatures do
-not survive editing. Text supports Windows-1252 (Western European)
-characters.
+Certificate-based digital seals, recipient fields, handoff packages and
+interactive form filling are still being ported. Drawn and typed signatures
+are visual annotations. Office conversion is unavailable in the reference
+Privseal implementation. Text annotations support Windows-1252 characters;
+comments support Unicode.
 
 ## Install
 
@@ -34,6 +35,8 @@ for installation. Install missing PDF dependencies with:
 
 ```sh
 omarchy pkg add qpdf poppler
+# For local English OCR:
+omarchy pkg add tesseract tesseract-data-eng
 ```
 
 For local testing, build version **1.0.0** from source with a Rust toolchain:
@@ -99,6 +102,25 @@ This source repository includes a Rust crate. `omarchy plugin add` clones
 source without running build hooks, so use the installer after building or
 unpacking a local archive. See the [Omarchy plugin contract](https://github.com/basecamp/omarchy/blob/quattro/shell/README.md).
 
+## Document tools
+
+**Tools** operates on the document including your edits. Page transformations
+clear annotation undo history, matching Privseal; export a copy to save the
+result. Split and image exports create a new subfolder without overwriting
+existing files. Cancel stops active rendering or OCR and keeps the open PDF.
+
+**Edit PDF text** covers the selected line in white and writes its replacement
+with an approximate standard font. The old text remains embedded. **Redact**
+removes content: mark regions and choose **Apply true redaction**, or export.
+Affected pages are rebuilt at 300 DPI and lose text selection. Verification
+refuses output if covered text still occurs elsewhere. Attachments are removed
+by default; the redaction tool exposes an explicit keep option.
+
+**Compress** previews before/after size. Lossless preserves quality; Smaller
+images recompresses eligible images; Compact converts pages to 120 DPI JPEG
+images and removes text selection, links and form interactivity. **OCR** uses
+the local Tesseract English model to add an invisible searchable layer.
+
 ## Build and distribute
 
 Developers need a Rust toolchain (edition 2024) in addition to the runtime
@@ -147,6 +169,7 @@ cargo test --locked --manifest-path native/Cargo.toml
 bash scripts/build.sh
 bash tests/ui-smoke.sh
 python3 tests/geometry-smoke.py
+python3 tests/jobs-smoke.py
 python3 -m unittest discover -s tests -p '*_test.py'
 ```
 

@@ -30,9 +30,20 @@ Item {
     signal colorSampled(string color)
     property var pendingImage: null
     property var savedSignatures: []
+    property var pendingAction: null
+    property var textLines: []
+    property int textPage: 0
+    property bool textRequested: false
+    property var searchHits: []
+    property int searchIndex: -1
+    property bool keepAttachments: false
+    property int revision: 0
+    property real progress: 0
+    property var compressionPreview: null
+    signal operationFinished(var result)
     property string savedState: ""
     property bool stopping: false
-    readonly property bool busy: (operation !== "" && operation !== "render") || pendingImage !== null || pendingColor !== null
+    readonly property bool busy: (operation !== "" && operation !== "render") || pendingImage !== null || pendingColor !== null || pendingAction !== null
     readonly property var page: pages.length ? pages[Math.min(current, pages.length - 1)] : null
     readonly property bool loaded: pages.length > 0
     readonly property bool dirty: loaded && snapshot() !== savedState
@@ -49,7 +60,7 @@ Item {
     function fileUrl(path) {
         return "file://" + path.split("/").map(function(part) { return encodeURIComponent(part); }).join("/");
     }
-    function snapshot() { return JSON.stringify({pages: pages, marks: marks}); }
+    function snapshot() { return JSON.stringify({pages: pages, marks: marks, revision: revision}); }
     function remember() {
         undoStack = undoStack.concat([snapshot()]).slice(-100);
         redoStack = [];
@@ -58,6 +69,7 @@ Item {
         var state = JSON.parse(value);
         pages = state.pages;
         marks = state.marks;
+        revision = state.revision || 0;
         current = Math.min(current, pages.length - 1);
         selected = -1;
     }
@@ -115,7 +127,7 @@ Item {
     }
     function resizeMark(index, dw, dh) {
         var mark = marks[index];
-        if (busy || !mark || ["image", "box", "highlight"].indexOf(mark.kind) < 0) return;
+        if (busy || !mark || ["image", "box", "highlight", "redact"].indexOf(mark.kind) < 0) return;
         var w = Math.max(0.01, Math.min(1 - mark.x, mark.w + dw));
         var h = Math.max(0.01, Math.min(1 - mark.y, mark.h + dh));
         if (w === mark.w && h === mark.h) return;
@@ -123,6 +135,35 @@ Item {
         var next = marks.slice();
         next[index] = Object.assign({}, mark, {w:w,h:h});
         marks = next;
+    }
+    function ensureText() {textRequested=true;pump();}
+    function search(query) {
+        if (!loaded || busy) return;
+        error="";
+        pendingAction={op:"search",values:{query:query}};
+        pump();
+    }
+    function nextSearch(delta) {
+        if (!searchHits.length) return;
+        searchIndex=(searchIndex+delta+searchHits.length)%searchHits.length;
+        var number=searchHits[searchIndex].page;
+        var index=pages.findIndex(function(page){return page.number===number;});
+        if (index>=0) current=index;
+    }
+    function replaceText(line,text,size,color,font) {
+        if (busy || !page) return;
+        remember();
+        var cover={kind:"cover",page:page.number,color:"#ffffff",size:1,x:Math.max(0,line.x-0.002),y:Math.max(0,line.y-0.002),w:Math.min(1-line.x,line.w+0.004),h:Math.min(1-line.y,line.h+0.004)};
+        var next=marks.concat([cover]);
+        if (text) next.push(Object.assign({page:page.number},textMark(line.x,line.textY===undefined ? line.y : line.textY,text,size,color,font)));
+        marks=next;selected=next.length-1;
+    }
+    function saveNote(index,text,x,y,color) {
+        if (busy || !page || !text.trim()) return;
+        if (index<0) addMark({kind:"note",color:color,size:1,x:x,y:y,w:18/page.width,h:18/page.height,text:text.trim()});
+        else if (marks[index] && marks[index].kind==="note" && marks[index].text!==text.trim()) {
+            remember();var next=marks.slice();next[index]=Object.assign({},next[index],{text:text.trim()});marks=next;
+        }
     }
     function sampleColor(x,y) {
         if (!loaded || busy) return;
@@ -192,6 +233,12 @@ Item {
         worker.write(JSON.stringify(values) + "\n");
         return true;
     }
+    function fromImages(paths) {
+        if (busy || loaded || !paths.length) return;
+        error="";
+        pendingAction={op:"fromImages",values:{paths:paths}};
+        if (!worker.running) {stopping=false;worker.stdinEnabled=true;worker.running=true;} else pump();
+    }
     function openDocument(path, password) {
         if (!path || busy) return;
         openingPath = path;
@@ -217,16 +264,38 @@ Item {
             pendingImage = null;
             status = "Preparing image…";
             request("image", image);
+        } else if (pendingAction) {
+            var action = pendingAction;
+            pendingAction = null;
+            request(action.op, action.values);
         } else if (page && (previewPage !== page.number || previewPixels !== desiredPixels)) {
             request("render", {page: page.number, pixels: desiredPixels});
-        }
+        } else if (page && textRequested && textPage!==page.number) request("text",{page:page.number});
+    }
+    function apply(action, options) {
+        if (!loaded || busy) return;
+        error = "";
+        progress = 0;
+        status = "Preparing document…";
+        pendingAction = {op:"apply", values:Object.assign({}, options || {}, {action:action,pages:pages,marks:marks,keepAttachments:keepAttachments})};
+        pump();
+    }
+    function acceptCompression(path) {
+        if (busy || !compressionPreview) return;
+        pendingAction = {op:"acceptCompression",values:path ? {path:path} : {}};
+        pump();
+    }
+    function cancel() {
+        if (operation === "") return;
+        worker.write(JSON.stringify({op:"cancel",target:serial}) + "\n");
+        status = "Cancelling…";
     }
     function exportDocument(path, compress, password) {
         if (!loaded || busy) return;
         if (operation !== "") { error = "Wait for the page preview to finish, then export."; return; }
         error = "";
         status = "Exporting PDF…";
-        request("export", {path: path, pages: pages, marks: marks, compress: compress, password: password});
+        request("export", {path: path, pages: pages, marks: marks, compress: compress, password: password,keepAttachments:keepAttachments});
     }
     function shutdown() {
         if (busy) return;
@@ -234,12 +303,18 @@ Item {
         pendingOpen = null;
         pendingImage = null;
         pendingColor = null;
+        pendingAction = null;
         if (worker.running) worker.stdinEnabled = false;
         else stopped();
     }
     function receive(message) {
         if (message.event === "ready") { ready = true; pump(); return; }
         if (message.id !== serial) return;
+        if (message.event === "progress") {
+            progress = message.total ? message.current / message.total : 0;
+            status = message.stage + "… " + message.current + "/" + message.total;
+            return;
+        }
         operation = "";
         if (!message.ok) {
             if (message.op === "open" && message.passwordRequired) {
@@ -248,12 +323,16 @@ Item {
                 passwordNeeded(openingPath);
                 return;
             }
-            error = message.error || "PDF operation failed.";
-            status = "Could not complete the operation.";
+            var cancelled = message.error === "Operation cancelled";
+            error = cancelled ? "" : (message.error || "PDF operation failed.");
+            status = cancelled ? "Operation cancelled. Your document is unchanged." : "Could not complete the operation.";
             return;
         }
         var result = message.result;
-        if (message.op === "open") {
+        if (message.op === "open" || result.baked) {
+            revision = result.baked ? revision + 1 : 0;
+            compressionPreview = null;
+            textPage=0;textLines=[];searchHits=[];searchIndex=-1;
             sourcePath = result.path;
             pages = result.pages.map(function(p) { p.rotation = 0; return p; });
             marks = [];
@@ -264,14 +343,26 @@ Item {
             preview = "";
             previewPage = 0;
             previewPixels = 0;
-            savedState = snapshot();
-            status = "Draw a signature or choose an annotation tool.";
+            if (!result.baked) savedState = snapshot();
+            status = result.baked ? "Document updated. Export a copy to save it." : "Draw a signature or choose an annotation tool.";
+            if (result.baked) operationFinished(result);
+        } else if (message.op === "apply" || message.op === "acceptCompression") {
+            if (result.candidate) { compressionPreview = result; status = "Compression preview ready."; }
+            else if (result.folder) status = "Saved " + result.count + " files in " + result.folder;
+            else if (result.saved) status = "Saved " + result.saved;
+            operationFinished(result);
         } else if (message.op === "render") {
             if (page && result.page === page.number && result.pixels === desiredPixels) {
                 preview = fileUrl(result.path);
                 previewPage = result.page;
                 previewPixels = result.pixels;
             }
+        } else if (message.op === "text") {
+            textPage=result.page;textLines=result.lines;
+        } else if (message.op === "search") {
+            searchHits=result.hits.filter(function(hit){return pages.some(function(page){return page.number===hit.page;});});
+            searchIndex=-1;nextSearch(1);
+            status=searchHits.length ? searchHits.length+" matching lines." : "No matching text. Scanned pages may need OCR.";
         } else if (message.op === "sample") {
             colorSampled(result.color);
         } else if (message.op === "image") {

@@ -308,8 +308,35 @@ ShellRoot {
                 phase=19;
             } else if (phase===19 && doc.fileName==="encrypted.pdf" && doc.operation==="") {
                 if (nativeEditor.openOptions) throw new Error("Password prompt remained after correct password");
-                nativeEditor.close();
-                phase=2;
+                nativeEditor.tool="note";
+                var target=control("pageInput");click(target,target.width*0.2,target.height*0.5);
+                phase=29;
+            } else if (phase===29) {
+                typeText("Review this clause");click(control("saveNote"),20,10);
+                if(doc.marks.length!==1 || doc.marks[0].kind!=="note") throw new Error("Comment was not saved");
+                click(control("tool-editText"),20,10);
+                phase=30;
+            } else if (phase===30 && !doc.busy && doc.textPage===doc.page.number) {
+                var line=doc.textLines.find(function(line){return line.text.indexOf("Draw a signature")>=0;});
+                if(!line) throw new Error("Existing PDF text was not detected");
+                var target=control("pageInput");click(target,(line.x+line.w/2)*target.width,(line.y+line.h/2)*target.height);
+                typeText("Replacement line");input.keyClick(Qt.Key_Return,Qt.NoModifier,0);
+                if(doc.marks.length!==3 || doc.marks[2].text!=="Replacement line") throw new Error("Existing PDF text replacement failed");
+                click(control("openDocumentTools"),20,10);
+                phase=31;
+            } else if (phase===31) {
+                click(control("operation-duplicate"),20,10);
+                click(control("applyDocumentTool"),20,10);
+                phase=32;
+            } else if (phase===32 && !doc.busy && doc.pages.length===3) {
+                if(doc.marks.length || doc.undoStack.length || !doc.dirty) throw new Error("Document operation state was not updated");
+                doc.search("Replacement line");
+                phase=33;
+            } else if (phase===33 && !doc.busy && doc.searchHits.length===2) {
+                doc.exportDocument(testDir+"/tools.pdf",false,"");
+                phase=34;
+            } else if (phase===34 && doc.status.startsWith("Saved ")) {
+                nativeEditor.close();phase=2;
             } else if (phase === 2 && !doc.ready && !doc.loaded) {
                 input.mouseClick(widget,widget.width/2,widget.height/2,Qt.RightButton,Qt.NoModifier,0);
                 phase=20;
@@ -329,7 +356,7 @@ ShellRoot {
                     ? 'hl.dsp.focus({ workspace = ' + JSON.stringify("name:" + previousWorkspace) + ' })'
                     : "workspace name:" + previousWorkspace);
                 if (previousToplevel) previousToplevel.activate();
-                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
+                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, comments, PDF text replacement, page duplication, search, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
         }

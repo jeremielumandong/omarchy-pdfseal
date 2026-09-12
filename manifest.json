@@ -4,7 +4,7 @@
   "name": "PDFSeal",
   "version": "1.0.0",
   "author": "arkane",
-  "description": "Native QML PDF signing, annotation, page organization, lossless compression and password protection with a local Rust worker.",
+  "description": "Native local PDF signing, annotation, page tools, OCR, verified redaction, compression and password protection.",
   "kinds": ["bar-widget"],
   "entryPoints": { "barWidget": "Widget.qml" },
   "barWidget": {
@@ -15,7 +15,7 @@
     "defaults": { "displayMode": "both" },
     "schema": [{
       "key": "displayMode", "type": "enum", "label": "Bar display",
-      "description": "both: icon and text; icon: icon only; text: text only. Right-click the widget to cycle.",
+      "description": "both: icon and text; icon: icon only; text: text only. Right-click the widget to choose icon only or text only.",
       "options": ["both", "icon", "text"], "defaultValue": "both"
     }]
   }

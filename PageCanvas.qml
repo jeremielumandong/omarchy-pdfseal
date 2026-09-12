@@ -22,6 +22,8 @@ Item {
     readonly property real unit: document.page ? width / document.page.width : 1
     readonly property bool available: document.preview !== "" && !document.busy
     signal textEditingStarted()
+    signal existingTextEditingStarted(real size)
+    signal noteRequested(int index,real x,real y)
     Keys.onPressed: function(event) {
         if (tool === "eyedropper" && event.key === Qt.Key_Escape) {
             colorPickCancelled(); event.accepted=true; return;
@@ -48,12 +50,24 @@ Item {
         inlineText.forceActiveFocus();
         inlineText.selectAll();
     }
+    function beginOriginal(line) {
+        if (!available) return;
+        finishText(true);
+        document.selected=-1;
+        line=Object.assign({},line,{textY:Math.max(0,line.y-line.size*0.282/document.page.height)});
+        textDraft={index:-1,x:line.x,y:line.textY,original:line.text,sourceLine:line};
+        inlineText.text=line.text;
+        existingTextEditingStarted(line.size);
+        textEditingStarted();
+        inlineText.forceActiveFocus();inlineText.selectAll();
+    }
     function finishText(save) {
         if (!textDraft) return;
         var draft = textDraft;
         var value = inlineText.text.trim();
         textDraft = null;
         if (!save || document.busy || !document.page) return;
+        if (draft.sourceLine) {document.replaceText(draft.sourceLine,value,textSize,inkColor,textFont);return;}
         if (draft.index < 0) {
             if (value) document.addMark(document.textMark(draft.x, draft.y, value, textSize, inkColor, textFont));
         } else if (!value) {
@@ -72,7 +86,7 @@ Item {
     function hit(x, y) {
         for (var i = document.marks.length - 1; i >= 0; --i) {
             var mark = document.marks[i];
-            if (mark.page !== document.page.number) continue;
+            if (mark.page !== document.page.number || mark.kind==="cover") continue;
             var box = bounds(mark);
             if (x >= box.x - 0.01 && x <= box.x + box.w + 0.01 && y >= box.y - 0.01 && y <= box.y + box.h + 0.01) return i;
         }
@@ -107,6 +121,12 @@ Item {
             mark.text.split("\n").forEach(function(line, i) {
                 ctx.fillText(line, mark.x * width, mark.y * height + mark.size * unit * (1 + i * 1.2));
             });
+        } else if (mark.kind === "note") {
+            ctx.fillRect(mark.x*width,mark.y*height,18*unit,18*unit);
+            ctx.fillStyle="#211d17";ctx.font=(14*unit)+"px sans-serif";ctx.fillText("…",mark.x*width+2*unit,mark.y*height+12*unit);
+        } else if (mark.kind === "cover" || mark.kind === "redact") {
+            ctx.fillStyle=mark.kind==="cover" ? "#ffffff" : "#000000";
+            ctx.fillRect(mark.x*width,mark.y*height,mark.w*width,mark.h*height);
         } else if (mark.kind === "highlight") {
             ctx.globalAlpha = 0.3;
             ctx.globalCompositeOperation = "multiply";
@@ -120,7 +140,7 @@ Item {
             ctx.lineWidth = 1.5;
             var dx = root.resizing ? 0 : root.dragX, dy = root.resizing ? 0 : root.dragY;
             ctx.strokeRect((b.x + dx) * width - 4, (b.y + dy) * height - 4, b.w * width + 8, b.h * height + 8);
-            if (["image","box","highlight"].indexOf(mark.kind) >= 0) {
+            if (["image","box","highlight","redact"].indexOf(mark.kind) >= 0) {
                 ctx.fillStyle = "#4279c2";
                 ctx.fillRect((b.x+dx+b.w)*width-4,(b.y+dy+b.h)*height-4,8,8);
             }
@@ -144,10 +164,25 @@ Item {
             var ctx = getContext("2d");
             ctx.reset();
             if (!root.document.page) return;
+            if (root.tool==="editText" && root.document.textPage===root.document.page.number) {
+                ctx.strokeStyle="#4279c2";ctx.lineWidth=1;ctx.globalAlpha=0.4;
+                root.document.textLines.forEach(function(line){ctx.strokeRect(line.x*root.width,line.y*root.height,line.w*root.width,line.h*root.height);});
+                ctx.globalAlpha=1;
+            }
+            var hit=root.document.searchIndex>=0 ? root.document.searchHits[root.document.searchIndex] : null;
+            if (hit && hit.page===root.document.page.number) {
+                ctx.fillStyle="#ffcc00";ctx.globalAlpha=0.35;ctx.fillRect(hit.x*root.width,hit.y*root.height,hit.w*root.width,hit.h*root.height);ctx.globalAlpha=1;
+            }
             root.document.marks.forEach(function(mark, index) {
                 if (root.textDraft && root.textDraft.index === index) return;
-                if (mark.page === root.document.page.number) root.paintMark(ctx, mark, index === root.document.selected);
+                if (mark.page === root.document.page.number && mark.kind!=="redact") root.paintMark(ctx, mark, index === root.document.selected);
             });
+            if (root.textDraft && root.textDraft.sourceLine) {
+                var line=root.textDraft.sourceLine;ctx.fillStyle="white";
+                ctx.fillRect(line.x*root.width-1,line.y*root.height-1,line.w*root.width+2,line.h*root.height+2);
+            }
+            // Redaction regions remain visibly opaque even after adding other marks.
+            root.document.marks.forEach(function(mark,index){if(mark.kind==="redact" && mark.page===root.document.page.number)root.paintMark(ctx,mark,index===root.document.selected);});
             if (root.draft) root.paintMark(ctx, root.draft, false);
 
         }
@@ -155,13 +190,15 @@ Item {
     Connections {
         target: root.document
         function onColorSampled(color) {root.colorPicked(color);}
+        function onTextLinesChanged(){canvas.requestPaint();}
+        function onSearchIndexChanged(){canvas.requestPaint();}
         function onMarksChanged() { canvas.requestPaint(); }
         function onPageChanged() { root.finishText(false); root.draft = null; canvas.requestPaint(); }
         function onSelectedChanged() { canvas.requestPaint(); }
     }
     onWidthChanged: canvas.requestPaint()
     onHeightChanged: canvas.requestPaint()
-    onToolChanged: { if (tool !== "select") finishText(true); canvas.requestPaint(); }
+    onToolChanged: { if (tool==="editText") document.ensureText(); if (tool !== "select") finishText(true); canvas.requestPaint(); }
     onPreviewInkChanged: canvas.requestPaint()
     onDraftChanged: canvas.requestPaint()
     onTextDraftChanged: canvas.requestPaint()
@@ -183,10 +220,17 @@ Item {
             }
             if (root.tool === "select") {
                 var selected = root.document.selectedMark;
-                root.resizing = selected && ["image","box","highlight"].indexOf(selected.kind) >= 0
+                root.resizing = selected && ["image","box","highlight","redact"].indexOf(selected.kind) >= 0
                     && Math.abs(p[0]-selected.x-selected.w)*width < 10 && Math.abs(p[1]-selected.y-selected.h)*height < 10;
                 if (root.resizing) return;
                 root.document.selected = root.hit(p[0], p[1]);
+                return;
+            }
+            if (root.tool==="note") {root.noteRequested(-1,p[0],p[1]);return;}
+            if (root.tool==="editText") {
+                if (root.document.textPage!==root.document.page.number) {root.document.ensureText();return;}
+                var line=root.document.textLines.find(function(line){return p[0]>=line.x-0.004 && p[0]<=line.x+line.w+0.004 && p[1]>=line.y-0.004 && p[1]<=line.y+line.h+0.004;});
+                if(line)root.beginOriginal(line);else root.document.status="Choose a text line. Scanned pages need OCR first.";
                 return;
             }
             if (root.tool === "text") {
@@ -227,7 +271,10 @@ Item {
         onDoubleClicked: function(mouse) {
             var p = position(mouse);
             var index = root.hit(p[0], p[1]);
-            if (root.tool === "select" && index >= 0 && root.document.marks[index].kind === "text") root.beginText(index, 0, 0);
+            if (root.tool === "select" && index >= 0) {
+                if(root.document.marks[index].kind === "text") root.beginText(index, 0, 0);
+                else if(root.document.marks[index].kind === "note") root.noteRequested(index,0,0);
+            }
         }
     }
     TextEdit {
