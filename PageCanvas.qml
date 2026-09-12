@@ -19,6 +19,13 @@ Item {
     readonly property real unit: document.page ? width / document.page.width : 1
     readonly property bool available: document.preview !== "" && !document.busy
     signal textEditingStarted()
+    Keys.onPressed: function(event) {
+        if (!textEditing && available && document.selected >= 0 &&
+                (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace)) {
+            document.removeMark();
+            event.accepted = true;
+        }
+    }
 
     function fontFamily(font) {
         return font === "serif" ? "Nimbus Roman" : font === "mono" ? "Nimbus Mono PS" : "Nimbus Sans";
@@ -158,6 +165,7 @@ Item {
         function position(mouse) { return [Math.max(0, Math.min(1, mouse.x / width)), Math.max(0, Math.min(1, mouse.y / height))]; }
         onPressed: function(mouse) {
             root.finishText(true);
+            root.forceActiveFocus();
             var p = position(mouse);
             startX = p[0]; startY = p[1];
             if (root.tool === "select") {
@@ -229,9 +237,9 @@ Item {
         onActiveFocusChanged: if (!activeFocus) root.finishText(true)
         Keys.onPressed: function(event) {
             if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
-                root.finishText(true); event.accepted = true;
+                root.finishText(true); root.forceActiveFocus(); event.accepted = true;
             } else if (event.key === Qt.Key_Escape) {
-                root.finishText(false); event.accepted = true;
+                root.finishText(false); root.forceActiveFocus(); event.accepted = true;
             }
         }
         Rectangle {

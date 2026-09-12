@@ -111,6 +111,9 @@ ShellRoot {
                 input.keyClick(Qt.Key_Return, Qt.NoModifier, 0);
                 if (doc.marks.length !== 2 || doc.marks[1].text !== "Signed") throw new Error("Typing did not place/update text");
                 if (Math.abs(doc.marks[1].x - 0.1) > 0.01 || Math.abs(doc.marks[1].y - 0.3) > 0.01) throw new Error("Text position was lost");
+                phase=12;
+            } else if (phase===12) {
+                var pageInput=control("pageInput");
                 var oldWidth = doc.marks[1].w;
                 click(control("increaseTextSize"), 10, 10);
                 if (doc.marks[1].size !== 20 || doc.marks[1].w <= oldWidth) throw new Error("Font size did not update selected text and bounds");
@@ -181,6 +184,21 @@ ShellRoot {
                 if (doc.marks.length !== 4 || doc.marks[3].kind !== "image") throw new Error("Dated stamp was not placed");
                 if (doc.savedSignatures.length !== 1) throw new Error("Stamp polluted signature library");
                 doc.moveMark(3,0.1-doc.marks[3].x,0.78-doc.marks[3].y);
+                phase=13;
+            } else if (phase===13) {
+                var target=control("pageInput");
+                // Selection returns keyboard focus to the page after using dialogs or text fields.
+                click(target,target.width*0.15,target.height*0.8);
+                if (doc.selected!==3) throw new Error("Stamp was not selected");
+                input.keyClick(Qt.Key_Delete,Qt.NoModifier,0);
+                if (doc.marks.length!==3 || doc.selected!==-1) throw new Error("Delete did not remove selected stamp");
+                doc.undo();
+                if (doc.marks.length!==4) throw new Error("Deleting stamp could not be undone");
+                click(target,target.width*0.12,target.height*0.31);
+                if (doc.selected!==1) throw new Error("Text was not selected");
+                input.keyClick(Qt.Key_Delete,Qt.NoModifier,0);
+                if (doc.marks.length!==3 || doc.marks.some(function(m){return m.kind==="text";})) throw new Error("Delete did not remove selected text");
+                doc.undo();
                 phase=4;
             } else if (phase === 4) {
                 focusTarget = Hyprland.toplevels.values.find(function(t) { return t.title === "• input.pdf — PDFSeal"; });
@@ -222,7 +240,7 @@ ShellRoot {
                     ? 'hl.dsp.focus({ workspace = ' + JSON.stringify("name:" + previousWorkspace) + ' })'
                     : "workspace name:" + previousWorkspace);
                 if (previousToplevel) previousToplevel.activate();
-                console.log("PASS: PDFSeal widget, icon/text modes, live theme bindings, inline text/fonts, typed signature, dated stamp, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
+                console.log("PASS: PDFSeal widget, icon/text modes, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
         }
