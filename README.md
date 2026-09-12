@@ -167,3 +167,5 @@ python3 ~/.config/omarchy/plugins/arkane.pdfseal/scripts/uninstall.py
 Exported PDFs and installation backups are preserved.
 
 Pinch the PDF to zoom, or use Ctrl+mouse wheel. Clicking an object gives it keyboard focus: Delete or Backspace removes it, and Undo restores it. Normal PDFs open immediately; the password dialog appears only when the PDF requires a password.
+
+**Custom color…** opens a movable picker with a draggable shade area, hue slider and hex input. Choose **Eyedropper from PDF**, then click the page to match its color. The chosen color updates selected text or becomes the ink for new text and drawings; Escape cancels sampling.

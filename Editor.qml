@@ -12,6 +12,8 @@ Item {
     property bool exportOptions: false
     property bool openOptions: false
     property bool signatureOptions: false
+    property bool colorOptions: false
+    property string previousColorTool: "select"
     property bool stampOptions: false
     property string imageLabel: ""
     property string nextAction: ""
@@ -160,7 +162,7 @@ Item {
             color: Color.background
             focus: true
             Keys.onPressed: function(event) {
-                if (root.signatureOptions || root.stampOptions) return;
+                if (root.signatureOptions || root.stampOptions || root.colorOptions) return;
                 if (event.modifiers & Qt.ControlModifier) {
                     if (event.key === Qt.Key_O) { root.choosePdf(); event.accepted = true; }
                     else if (event.key === Qt.Key_S && document.loaded) { pageCanvas.finishText(true); root.exportOptions = true; event.accepted = true; }
@@ -246,6 +248,13 @@ Item {
                                     MouseArea { anchors.fill: parent; onClicked: root.changeInk(parent.modelData) }
                                 }
                             }
+                        }
+                        Button {
+                            objectName:"openColorPicker"
+                            width:parent.width
+                            text:"Custom color…"
+                            enabled:!document.busy
+                            onClicked:{pageCanvas.finishText(true);root.colorOptions=true;}
                         }
                         Row {
                             spacing: Style.space(6)
@@ -402,6 +411,9 @@ Item {
                                     strokeSize: root.penSize
                                     textSize: root.textSize
                                     textFont: root.textFont
+                                    previewInk:root.colorOptions ? colorPicker.hexColor : ""
+                                    onColorPicked:function(color){root.changeInk(color);root.tool=root.previousColorTool;document.status="Color "+color+" selected.";}
+                                    onColorPickCancelled:{root.tool=root.previousColorTool;document.status="Color sampling cancelled.";}
                                     onTextEditingStarted: root.tool = "select"
                                 }
                             }
@@ -477,6 +489,16 @@ Item {
                         }
                     }
                 }
+            }
+            ColorPicker {
+                id:colorPicker
+                objectName:"colorPicker"
+                anchors.fill:parent
+                visible:root.colorOptions
+                initialColor:root.ink
+                onAccepted:function(color){root.changeInk(color);root.colorOptions=false;}
+                onDismissed:root.colorOptions=false
+                onEyedropperRequested:{root.colorOptions=false;root.previousColorTool=root.tool;root.tool="eyedropper";pageCanvas.forceActiveFocus();document.status="Click a color on the PDF. Escape cancels.";}
             }
             SignatureDialog {
                 objectName: "signatureDialog"

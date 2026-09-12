@@ -9,6 +9,9 @@ Item {
     property real strokeSize: 2
     property real textSize: 18
     property string textFont: "sans"
+    property string previewInk: ""
+    signal colorPicked(string color)
+    signal colorPickCancelled()
     property var textDraft: null
     readonly property bool textEditing: textDraft !== null
     readonly property bool textDraftDirty: textDraft !== null && inlineText.text.trim() !== textDraft.original
@@ -20,6 +23,9 @@ Item {
     readonly property bool available: document.preview !== "" && !document.busy
     signal textEditingStarted()
     Keys.onPressed: function(event) {
+        if (tool === "eyedropper" && event.key === Qt.Key_Escape) {
+            colorPickCancelled(); event.accepted=true; return;
+        }
         if (!textEditing && available && document.selected >= 0 &&
                 (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace)) {
             document.removeMark();
@@ -73,6 +79,7 @@ Item {
         return -1;
     }
     function paintMark(ctx, mark, selected) {
+        if (selected && previewInk && mark.kind === "text") mark=Object.assign({},mark,{color:previewInk});
         if (selected && root.resizing) mark = Object.assign({}, mark, {
             w:Math.max(0.01,Math.min(1-mark.x,mark.w+root.dragX)),
             h:Math.max(0.01,Math.min(1-mark.y,mark.h+root.dragY))});
@@ -142,10 +149,12 @@ Item {
                 if (mark.page === root.document.page.number) root.paintMark(ctx, mark, index === root.document.selected);
             });
             if (root.draft) root.paintMark(ctx, root.draft, false);
+
         }
     }
     Connections {
         target: root.document
+        function onColorSampled(color) {root.colorPicked(color);}
         function onMarksChanged() { canvas.requestPaint(); }
         function onPageChanged() { root.finishText(false); root.draft = null; canvas.requestPaint(); }
         function onSelectedChanged() { canvas.requestPaint(); }
@@ -153,6 +162,7 @@ Item {
     onWidthChanged: canvas.requestPaint()
     onHeightChanged: canvas.requestPaint()
     onToolChanged: { if (tool !== "select") finishText(true); canvas.requestPaint(); }
+    onPreviewInkChanged: canvas.requestPaint()
     onDraftChanged: canvas.requestPaint()
     onTextDraftChanged: canvas.requestPaint()
     MouseArea {
@@ -168,6 +178,9 @@ Item {
             root.forceActiveFocus();
             var p = position(mouse);
             startX = p[0]; startY = p[1];
+            if (root.tool === "eyedropper") {
+                root.document.sampleColor(p[0],p[1]);return;
+            }
             if (root.tool === "select") {
                 var selected = root.document.selectedMark;
                 root.resizing = selected && ["image","box","highlight"].indexOf(selected.kind) >= 0
@@ -236,6 +249,9 @@ Item {
         selectedTextColor: root.inkColor
         onActiveFocusChanged: if (!activeFocus) root.finishText(true)
         Keys.onPressed: function(event) {
+        if (tool === "eyedropper" && event.key === Qt.Key_Escape) {
+            colorPickCancelled(); event.accepted=true; return;
+        }
             if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
                 root.finishText(true); root.forceActiveFocus(); event.accepted = true;
             } else if (event.key === Qt.Key_Escape) {

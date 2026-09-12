@@ -251,6 +251,65 @@ impl Session {
         Ok(json!({ "path": image, "page": number, "pixels": pixels, "cached": cached }))
     }
 
+    fn sample(&mut self, request: &Value) -> Result<Value> {
+        let number = request["page"].as_u64().ok_or("Choose a page")? as usize;
+        if number == 0 || number > self.pages.len() {
+            return Err("Page out of range".into());
+        }
+        let coordinate = |key: &str| -> Result<f64> {
+            let value = request[key].as_f64().ok_or("Missing sample position")?;
+            if !(0. ..=1.).contains(&value) {
+                return Err("Invalid sample position".into());
+            }
+            Ok(value)
+        };
+        let (x, y) = (coordinate("x")?, coordinate("y")?);
+        let marks = request["marks"]
+            .as_array()
+            .ok_or("Missing annotations")?
+            .iter()
+            .filter(|m| m["page"].as_u64() == Some(number as u64))
+            .cloned()
+            .collect::<Vec<_>>();
+        let work = tempfile::Builder::new()
+            .prefix("color-")
+            .tempdir_in(self.dir.path())?;
+        let pixels = request["pixels"].as_u64().unwrap_or(1600).clamp(600, 2600) as u32;
+        let path = if marks.is_empty() {
+            let preview = self.render(number, pixels)?;
+            PathBuf::from(preview["path"].as_str().ok_or("Missing preview")?)
+        } else {
+            let baked = work.path().join("sample.pdf");
+            self.export(&json!({"path":baked,"pages":[{"number":number}],"marks":marks}))?;
+            let prefix = work.path().join("sample");
+            let output = Command::new("pdftoppm")
+                .args([
+                    "-f",
+                    "1",
+                    "-l",
+                    "1",
+                    "-scale-to",
+                    &pixels.to_string(),
+                    "-cropbox",
+                    "-singlefile",
+                    "-png",
+                ])
+                .arg(baked)
+                .arg(&prefix)
+                .output()?;
+            if !output.status.success() {
+                return Err("Could not sample PDF color".into());
+            }
+            prefix.with_extension("png")
+        };
+        let image = image::open(path)?.to_rgb8();
+        let pixel = image.get_pixel(
+            ((x * image.width() as f64) as u32).min(image.width() - 1),
+            ((y * image.height() as f64) as u32).min(image.height() - 1),
+        );
+        Ok(json!({"color":format!("#{:02x}{:02x}{:02x}",pixel[0],pixel[1],pixel[2])}))
+    }
+
     fn export(&self, request: &Value) -> Result<Value> {
         let output = PathBuf::from(required_str(request, "path")?);
         if !output.is_absolute() {
@@ -529,6 +588,7 @@ fn dispatch(session: &mut Option<Session>, request: &Value) -> Result<Value> {
             request["pixels"].as_u64().unwrap_or(1600).min(2600) as u32,
         ),
         "export" => session.as_ref().ok_or("Open a PDF first")?.export(request),
+        "sample" => session.as_mut().ok_or("Open a PDF first")?.sample(request),
         "image" => images::prepare(required_str(request, "source")?),
         "close" => {
             *session = None;
@@ -676,6 +736,24 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn eyedropper_samples_pdf_and_composited_annotations() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.pdf");
+        fixture(&source);
+        let mut session = Session::open(source.to_str().unwrap(), "").unwrap();
+        let mut request = json!({"page":1,"x":0.5,"y":0.5,"marks":[]});
+        assert_eq!(session.sample(&request).unwrap()["color"], "#ffffff");
+        request["marks"] = json!([{"kind":"highlight","page":1,"color":"#ff0000","size":1,"x":0.4,"y":0.4,"w":0.2,"h":0.2}]);
+        let sampled = session.sample(&request).unwrap();
+        let hex = sampled["color"].as_str().unwrap();
+        assert_eq!(&hex[1..3], "ff");
+        let green = u8::from_str_radix(&hex[3..5], 16).unwrap();
+        assert!((176..=180).contains(&green), "{hex}");
+        request["x"] = json!(-0.1);
+        assert!(session.sample(&request).is_err());
     }
 
     #[test]

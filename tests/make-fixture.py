@@ -10,7 +10,7 @@ objects = [
     b"<< /Type /Page /Parent 2 0 R /Contents 6 0 R /Rotate 90 >>",
     b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
 ]
-content = b"BT /F1 22 Tf 45 620 Td (PDFSeal native test document) Tj 0 -42 Td (Draw a signature below.) Tj ET"
+content = b"q 0.2 0.4 0.6 rg 350 350 100 60 re f Q BT /F1 22 Tf 45 620 Td (PDFSeal native test document) Tj 0 -42 Td (Draw a signature below.) Tj ET"
 objects.append(b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"\nendstream")
 pdf = bytearray(b"%PDF-1.7\n")
 offsets = [0]

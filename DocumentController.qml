@@ -26,11 +26,13 @@ Item {
     property string openingPath: ""
     signal passwordNeeded(string path)
     property var pendingOpen: null
+    property var pendingColor: null
+    signal colorSampled(string color)
     property var pendingImage: null
     property var savedSignatures: []
     property string savedState: ""
     property bool stopping: false
-    readonly property bool busy: (operation !== "" && operation !== "render") || pendingImage !== null
+    readonly property bool busy: (operation !== "" && operation !== "render") || pendingImage !== null || pendingColor !== null
     readonly property var page: pages.length ? pages[Math.min(current, pages.length - 1)] : null
     readonly property bool loaded: pages.length > 0
     readonly property bool dirty: loaded && snapshot() !== savedState
@@ -122,6 +124,13 @@ Item {
         next[index] = Object.assign({}, mark, {w:w,h:h});
         marks = next;
     }
+    function sampleColor(x,y) {
+        if (!loaded || busy) return;
+        error="";
+        status="Sampling PDF color…";
+        pendingColor={page:page.number,pixels:desiredPixels,x:x,y:y,marks:marks};
+        pump();
+    }
     function prepareImage(source) {
         if (!loaded || busy) return;
         error = "";
@@ -201,6 +210,8 @@ Item {
             pendingOpen = null;
             status = "Opening PDF…";
             request("open", next);
+        } else if (pendingColor) {
+            var sample=pendingColor;pendingColor=null;request("sample",sample);
         } else if (pendingImage) {
             var image = pendingImage;
             pendingImage = null;
@@ -222,6 +233,7 @@ Item {
         stopping = true;
         pendingOpen = null;
         pendingImage = null;
+        pendingColor = null;
         if (worker.running) worker.stdinEnabled = false;
         else stopped();
     }
@@ -260,6 +272,8 @@ Item {
                 previewPage = result.page;
                 previewPixels = result.pixels;
             }
+        } else if (message.op === "sample") {
+            colorSampled(result.color);
         } else if (message.op === "image") {
             imagePrepared(result);
         } else if (message.op === "export") {

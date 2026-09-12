@@ -6,6 +6,7 @@ import Quickshell.Hyprland
 import qs.Commons
 
 ShellRoot {
+    property int colorHistory: 0
     property var touches: null
     property int phase: 0
     onPhaseChanged: console.log("Regression phase " + phase)
@@ -204,6 +205,41 @@ ShellRoot {
                 input.keyClick(Qt.Key_Delete,Qt.NoModifier,0);
                 if (doc.marks.length!==3 || doc.marks.some(function(m){return m.kind==="text";})) throw new Error("Delete did not remove selected text");
                 doc.undo();
+                phase=23;
+            } else if (phase===23) {
+                var target=control("pageInput");
+                click(target,target.width*0.12,target.height*0.31);
+                click(control("openColorPicker"),20,10);
+                phase=24;
+            } else if (phase===24) {
+                var picker=control("colorPicker"), hue=control("colorHue"), shade=control("colorShade");
+                click(hue,10,hue.height/3);
+                input.mousePress(shade,shade.width*0.2,shade.height*0.2,Qt.LeftButton,Qt.NoModifier,0);
+                input.mouseMove(shade,shade.width*0.75,shade.height*0.25,0,Qt.LeftButton,Qt.NoModifier);
+                input.mouseRelease(shade,shade.width*0.75,shade.height*0.25,Qt.LeftButton,Qt.NoModifier,0);
+                if (Math.abs(picker.saturation-0.75)>0.03 || Math.abs(picker.value-0.75)>0.03) throw new Error("Dragging color selector failed");
+                var panel=control("colorPickerPanel"), oldX=panel.x, drag=control("colorPickerDrag");
+                input.mousePress(drag,25,10,Qt.LeftButton,Qt.NoModifier,0);
+                input.mouseMove(drag,55,30,0,Qt.LeftButton,Qt.NoModifier);
+                input.mouseMove(drag,70,35,0,Qt.LeftButton,Qt.NoModifier);
+                input.mouseRelease(drag,70,35,Qt.LeftButton,Qt.NoModifier,0);
+                if (panel.x<=oldX) throw new Error("Color picker could not be moved");
+                colorHistory=doc.undoStack.length;
+                click(control("applyColor"),20,10);
+                if (doc.marks[1].color!==picker.hexColor || doc.undoStack.length!==colorHistory+1) throw new Error("Color did not apply to selected text as one edit");
+                phase=25;
+            } else if (phase===25) {
+                click(control("openColorPicker"),20,10);
+                phase=26;
+            } else if (phase===26) {
+                click(control("colorEyedropper"),20,10);
+                if (nativeEditor.tool!=="eyedropper" || nativeEditor.colorOptions) throw new Error("Eyedropper did not activate");
+                var target=control("pageInput");
+                click(target,target.width*0.8,target.height*0.45);
+                phase=27;
+            } else if (phase===27 && nativeEditor.tool!=="eyedropper") {
+                if (nativeEditor.ink!=="#336699" || doc.marks[1].color!=="#336699") {Qt.quit(); throw new Error("Eyedropper did not match the PDF color: "+nativeEditor.ink); }
+                if (doc.marks.length!==4) throw new Error("Eyedropper added an annotation");
                 phase=14;
             } else if (phase===14) {
                 var viewport=control("pdfViewport");
@@ -293,7 +329,7 @@ ShellRoot {
                     ? 'hl.dsp.focus({ workspace = ' + JSON.stringify("name:" + previousWorkspace) + ' })'
                     : "workspace name:" + previousWorkspace);
                 if (previousToplevel) previousToplevel.activate();
-                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, pinch/wheel zoom, password-only-when-required, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
+                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
         }
