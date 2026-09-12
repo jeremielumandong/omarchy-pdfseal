@@ -11,6 +11,7 @@ use std::process::{Command, Stdio};
 use tempfile::{NamedTempFile, TempDir};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+mod images;
 
 #[derive(Clone, Serialize)]
 struct Page {
@@ -49,6 +50,8 @@ struct Mark {
     text: String,
     #[serde(default)]
     font: String,
+    #[serde(default, rename = "dataUrl")]
+    image_data: String,
     #[serde(default)]
     points: Vec<[f32; 2]>,
 }
@@ -332,6 +335,7 @@ fn op(name: &str, values: &[f32]) -> Operation {
 /// A Form XObject isolates our font/opacity/graphics state from the source PDF.
 fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
     let mut operations = vec![];
+    let mut image_resources = dictionary! {};
     for mark in marks {
         let values = [mark.x, mark.y, mark.w, mark.h];
         if values
@@ -356,6 +360,26 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
         let x = mark.x * page.width;
         let y = (1.0 - mark.y) * page.height;
         match mark.kind.as_str() {
+            "image" => {
+                if mark.w <= 0.0 || mark.h <= 0.0 || !mark.image_data.starts_with("data:image/") {
+                    return Err("Invalid image annotation".into());
+                }
+                let id = images::embed(doc, &mark.image_data)?;
+                let name = format!("Image_{}", id.0);
+                image_resources.set(name.as_bytes(), id);
+                operations.push(op(
+                    "cm",
+                    &[
+                        mark.w * page.width,
+                        0.0,
+                        0.0,
+                        mark.h * page.height,
+                        x,
+                        y - mark.h * page.height,
+                    ],
+                ));
+                operations.push(Operation::new("Do", vec![Object::Name(name.into_bytes())]));
+            }
             "ink" => {
                 if mark.points.len() < 2 || mark.points.len() > 100_000 {
                     return Err("Ink strokes need between 2 and 100000 points".into());
@@ -423,6 +447,7 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
             "Type" => "XObject", "Subtype" => "Form", "FormType" => 1,
             "BBox" => vec![0.into(), 0.into(), page.width.into(), page.height.into()],
             "Resources" => dictionary! {
+                "XObject" => image_resources,
                 "Font" => dictionary! { "Text" => font, "Serif" => serif, "Mono" => mono },
                 "ExtGState" => dictionary! {
                     "Highlight" => dictionary! { "Type" => "ExtGState", "ca" => 0.3, "BM" => "Multiply" }
@@ -489,6 +514,7 @@ fn dispatch(session: &mut Option<Session>, request: &Value) -> Result<Value> {
             request["pixels"].as_u64().unwrap_or(1600).min(2600) as u32,
         ),
         "export" => session.as_ref().ok_or("Open a PDF first")?.export(request),
+        "image" => images::prepare(required_str(request, "source")?),
         "close" => {
             *session = None;
             Ok(json!({}))

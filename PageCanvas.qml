@@ -15,6 +15,7 @@ Item {
     property var draft: null
     property real dragX: 0
     property real dragY: 0
+    property bool resizing: false
     readonly property real unit: document.page ? width / document.page.width : 1
     readonly property bool available: document.preview !== "" && !document.busy
     signal textEditingStarted()
@@ -65,14 +66,20 @@ Item {
         return -1;
     }
     function paintMark(ctx, mark, selected) {
+        if (selected && root.resizing) mark = Object.assign({}, mark, {
+            w:Math.max(0.01,Math.min(1-mark.x,mark.w+root.dragX)),
+            h:Math.max(0.01,Math.min(1-mark.y,mark.h+root.dragY))});
         ctx.save();
-        if (selected) ctx.translate(root.dragX * width, root.dragY * height);
+        if (selected && !root.resizing) ctx.translate(root.dragX * width, root.dragY * height);
         ctx.strokeStyle = mark.color;
         ctx.fillStyle = mark.color;
         ctx.lineWidth = mark.size * unit;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        if (mark.kind === "ink") {
+        if (mark.kind === "image") {
+            if (canvas.isImageLoaded(mark.dataUrl)) ctx.drawImage(mark.dataUrl, mark.x * width, mark.y * height, mark.w * width, mark.h * height);
+            else canvas.loadImage(mark.dataUrl);
+        } else if (mark.kind === "ink") {
             ctx.beginPath();
             for (var i = 0; i < mark.points.length; ++i) {
                 var point = mark.points[i];
@@ -97,7 +104,12 @@ Item {
             ctx.save();
             ctx.strokeStyle = "#4279c2";
             ctx.lineWidth = 1.5;
-            ctx.strokeRect((b.x + root.dragX) * width - 4, (b.y + root.dragY) * height - 4, b.w * width + 8, b.h * height + 8);
+            var dx = root.resizing ? 0 : root.dragX, dy = root.resizing ? 0 : root.dragY;
+            ctx.strokeRect((b.x + dx) * width - 4, (b.y + dy) * height - 4, b.w * width + 8, b.h * height + 8);
+            if (["image","box","highlight"].indexOf(mark.kind) >= 0) {
+                ctx.fillStyle = "#4279c2";
+                ctx.fillRect((b.x+dx+b.w)*width-4,(b.y+dy+b.h)*height-4,8,8);
+            }
             ctx.restore();
         }
     }
@@ -113,6 +125,7 @@ Item {
     Canvas {
         id: canvas
         anchors.fill: parent
+        onImageLoaded: requestPaint()
         onPaint: {
             var ctx = getContext("2d");
             ctx.reset();
@@ -148,6 +161,10 @@ Item {
             var p = position(mouse);
             startX = p[0]; startY = p[1];
             if (root.tool === "select") {
+                var selected = root.document.selectedMark;
+                root.resizing = selected && ["image","box","highlight"].indexOf(selected.kind) >= 0
+                    && Math.abs(p[0]-selected.x-selected.w)*width < 10 && Math.abs(p[1]-selected.y-selected.h)*height < 10;
+                if (root.resizing) return;
                 root.document.selected = root.hit(p[0], p[1]);
                 return;
             }
@@ -176,13 +193,16 @@ Item {
             canvas.requestPaint();
         }
         onReleased: {
-            if (root.tool === "select") root.document.moveMark(root.document.selected, root.dragX, root.dragY);
+            if (root.tool === "select") {
+                if (root.resizing) root.document.resizeMark(root.document.selected, root.dragX, root.dragY);
+                else root.document.moveMark(root.document.selected, root.dragX, root.dragY);
+            }
             else if (root.draft && (root.draft.kind === "ink" ? root.draft.points.length > 1 : root.draft.w > 0.002 && root.draft.h > 0.002))
                 root.document.addMark(root.draft);
-            root.dragX = 0; root.dragY = 0; root.draft = null;
+            root.dragX = 0; root.dragY = 0; root.draft = null; root.resizing = false;
             canvas.requestPaint();
         }
-        onCanceled: { root.dragX = 0; root.dragY = 0; root.draft = null; }
+        onCanceled: { root.dragX = 0; root.dragY = 0; root.draft = null; root.resizing = false; }
         onDoubleClicked: function(mouse) {
             var p = position(mouse);
             var index = root.hit(p[0], p[1]);

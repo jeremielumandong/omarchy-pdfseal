@@ -148,7 +148,40 @@ ShellRoot {
                 nativeEditor.close();
                 if (!nativeEditor.opened || !nativeEditor.confirmDiscard) throw new Error("Unsaved changes not protected");
                 nativeEditor.confirmDiscard = false;
-                phase = 4;
+                click(control("tool-signature"),20,10);
+                phase = 7;
+            } else if (phase === 7 && control("signatureDialog").fontsReady) {
+                click(control("signature-type"),20,10);
+                control("signatureName").forceActiveFocus();
+                typeText("Jeremie Example");
+                click(control("signatureFont-2"),20,10);
+                phase = 8;
+            } else if (phase === 8) {
+                click(control("placeSignature"),20,10);
+                phase = 9;
+            } else if (phase === 9 && !doc.busy && !nativeEditor.signatureOptions) {
+                if (doc.marks.length !== 3 || doc.marks[2].kind !== "image" || doc.savedSignatures.length !== 1) throw new Error("Typed signature was not placed/saved");
+                if (doc.savedSignatures[0].width < 500 || doc.savedSignatures[0].width / doc.savedSignatures[0].height < 3) throw new Error("Typed signature capture is cropped");
+                var picture=doc.marks[2], oldW=picture.w, oldH=picture.h;
+                var target=control("pageInput"), x=(picture.x+picture.w)*target.width, y=(picture.y+picture.h)*target.height;
+                input.mousePress(target,x,y,Qt.LeftButton,Qt.NoModifier,0);
+                input.mouseMove(target,x+20,y+15,0,Qt.LeftButton,Qt.NoModifier);
+                input.mouseRelease(target,x+20,y+15,Qt.LeftButton,Qt.NoModifier,0);
+                if (doc.marks[2].w <= oldW || doc.marks[2].h <= oldH) throw new Error("Signature corner resize failed");
+                doc.undo();
+                if (doc.marks[2].w !== oldW) throw new Error("Resize undo failed");
+                doc.redo();
+                doc.moveMark(2,0.45-doc.marks[2].x,0.65-doc.marks[2].y);
+                click(control("tool-stamp"),20,10);
+                phase=10;
+            } else if (phase === 10) {
+                click(control("stamp-6"),30,30);
+                phase=11;
+            } else if (phase === 11 && !doc.busy && !nativeEditor.stampOptions) {
+                if (doc.marks.length !== 4 || doc.marks[3].kind !== "image") throw new Error("Dated stamp was not placed");
+                if (doc.savedSignatures.length !== 1) throw new Error("Stamp polluted signature library");
+                doc.moveMark(3,0.1-doc.marks[3].x,0.78-doc.marks[3].y);
+                phase=4;
             } else if (phase === 4) {
                 focusTarget = Hyprland.toplevels.values.find(function(t) { return t.title === "• input.pdf — PDFSeal"; });
                 if (!focusTarget || !focusTarget.wayland) return;
@@ -161,7 +194,7 @@ ShellRoot {
                 nativeEditor.open();
                 phase = 6;
             } else if (phase === 6 && focusTarget.activated && Hyprland.focusedWorkspace.name === focusWorkspace) {
-                if (!doc.ready || doc.marks.length !== 2 || doc.marks[1].text !== "Updated text" || !doc.dirty)
+                if (!doc.ready || doc.marks.length !== 4 || doc.marks[1].text !== "Updated text" || !doc.dirty)
                     throw new Error("Workspace activation lost document edits");
                 doc.exportDocument(testDir + "/signed.pdf", true, "");
                 phase = 1;
@@ -189,7 +222,7 @@ ShellRoot {
                     ? 'hl.dsp.focus({ workspace = ' + JSON.stringify("name:" + previousWorkspace) + ' })'
                     : "workspace name:" + previousWorkspace);
                 if (previousToplevel) previousToplevel.activate();
-                console.log("PASS: PDFSeal widget, icon/text modes, live theme bindings, click/type text, font-size editing, undo/redo, cross-workspace activation, unsaved guard, export and worker shutdown");
+                console.log("PASS: PDFSeal widget, icon/text modes, live theme bindings, inline text/fonts, typed signature, dated stamp, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
         }

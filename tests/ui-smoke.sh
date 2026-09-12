@@ -8,6 +8,7 @@ for module in Commons Ui; do
     ln -s "$shell_dir/$module" "$test_dir/$module"
 done
 cp "$plugin_dir"/*.qml "$test_dir/"
+if [[ -d "$plugin_dir/assets" ]]; then cp -a "$plugin_dir/assets" "$test_dir/"; fi
 ln -s "$plugin_dir/bin" "$test_dir/bin"
 cp "$plugin_dir/tests/ui-smoke.qml" "$test_dir/shell.qml"
 python3 "$plugin_dir/tests/make-fixture.py" "$test_dir/input.pdf"
@@ -15,6 +16,9 @@ PDFSEAL_TEST_DIR="$test_dir" timeout 20 quickshell -p "$test_dir" --no-color >"$
 rg -q 'PASS: PDFSeal widget' "$test_dir/output.log"
 pdftotext "$test_dir/signed.pdf" - | rg -q 'Updated text'
 pdffonts "$test_dir/signed.pdf" | rg -q 'Times-Roman'
+if [[ -n ${PDFSEAL_CAPTURE:-} ]]; then
+    pdftoppm -f 1 -l 1 -singlefile -scale-to 1200 -png "$test_dir/signed.pdf" "$PDFSEAL_CAPTURE.export"
+fi
 if rg 'ERROR|TypeError|ReferenceError|Cannot assign|Cannot open:' "$test_dir/output.log"; then
     exit 1
 fi

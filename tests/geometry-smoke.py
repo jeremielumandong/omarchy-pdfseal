@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Verify exported annotation placement using independent Poppler rasterization."""
 import json
+import base64
+import struct
+import zlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -34,23 +37,30 @@ with tempfile.TemporaryDirectory(prefix="pdfseal-geometry-") as folder:
         cached = request("render", page=1, pixels=1600)
         warm_ms = (time.perf_counter() - start) * 1000
         assert cached["cached"]
-        request("export", path=str(work / "marked.pdf"),
-                pages=[dict(number=n) for n in range(1, 5)],
-                marks=[dict(page=n, kind="box", color="#cc0033", size=2,
-                            x=0.2, y=0.3, w=0.25, h=0.15) for n in range(1, 5)])
-        for n in range(1, 5):
-            image = subprocess.check_output(["pdftoppm", "-f", str(n), "-l", str(n),
-                      "-singlefile", "-cropbox", "-scale-to", "700", str(work / "marked.pdf")])
-            magic, dimensions, maximum, pixels = image.split(b"\n", 3)
-            assert magic == b"P6" and maximum == b"255"
-            width, height = map(int, dimensions.split())
-            hits = [(i % width, i // width) for i in range(width * height)
-                    if pixels[i * 3] > 150 and pixels[i * 3 + 1] < 60 and 20 < pixels[i * 3 + 2] < 110]
-            assert hits, f"Page {n}: annotation missing"
-            actual = [min(x for x, y in hits) / width, min(y for x, y in hits) / height,
-                      max(x for x, y in hits) / width, max(y for x, y in hits) / height]
-            assert all(abs(a - b) < 0.01 for a, b in zip(actual, [0.2, 0.3, 0.45, 0.45])), (n, actual)
-        print(f"PASS: annotation placement at 0/90/180/270 degrees; fixture preview {cold_ms:.1f} ms, cached {warm_ms:.1f} ms")
+        def chunk(kind, data):
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        # Transparent top quarter tests image orientation and alpha independently.
+        raw = b"".join(b"\0" + bytes([204, 0, 51, 0 if y < 5 else 255]) * 40 for y in range(20))
+        png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 40, 20, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+        data_url = "data:image/png;base64," + base64.b64encode(png).decode()
+        for kind in ("box", "image"):
+            request("export", path=str(work / "marked.pdf"),
+                    pages=[dict(number=n) for n in range(1, 5)],
+                    marks=[dict(page=n, kind=kind, dataUrl=data_url, color="#cc0033", size=2,
+                                x=0.2, y=0.3, w=0.25, h=0.15) for n in range(1, 5)])
+            for n in range(1, 5):
+                image = subprocess.check_output(["pdftoppm", "-f", str(n), "-l", str(n),
+                          "-singlefile", "-cropbox", "-scale-to", "700", str(work / "marked.pdf")])
+                magic, dimensions, maximum, pixels = image.split(b"\n", 3)
+                assert magic == b"P6" and maximum == b"255"
+                width, height = map(int, dimensions.split())
+                hits = [(i % width, i // width) for i in range(width * height)
+                        if pixels[i * 3] > 150 and pixels[i * 3 + 1] < 60 and 20 < pixels[i * 3 + 2] < 110]
+                assert hits, f"Page {n}: annotation missing"
+                actual = [min(x for x, y in hits) / width, min(y for x, y in hits) / height,
+                          max(x for x, y in hits) / width, max(y for x, y in hits) / height]
+                assert all(abs(a - b) < 0.01 for a, b in zip(actual, [0.2, 0.3375 if kind == "image" else 0.3, 0.45, 0.45])), (kind, n, actual)
+        print(f"PASS: box/image placement and transparency at 0/90/180/270 degrees; fixture preview {cold_ms:.1f} ms, cached {warm_ms:.1f} ms")
     finally:
         worker.stdin.close()
         assert worker.wait(timeout=10) == 0

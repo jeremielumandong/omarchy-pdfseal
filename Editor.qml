@@ -11,6 +11,9 @@ Item {
     property bool confirmDiscard: false
     property bool exportOptions: false
     property bool openOptions: false
+    property bool signatureOptions: false
+    property bool stampOptions: false
+    property string imageLabel: ""
     property string nextAction: ""
     property string pickedPath: ""
     property string tool: "ink"
@@ -70,6 +73,14 @@ Item {
     }
     Connections {
         target: document
+        function onImagePrepared(asset) {
+            document.addImage(asset);
+            if (root.imageLabel !== "Stamp" && root.imageLabel !== "Saved")
+                document.savedSignatures = [Object.assign({},asset,{label:root.imageLabel})].concat(document.savedSignatures).slice(0,20);
+            root.signatureOptions = false;
+            root.stampOptions = false;
+            root.tool = "select";
+        }
         function onSelectedMarkChanged() {
             if (!root.selectedText) return;
             var mark = document.selectedMark;
@@ -148,6 +159,7 @@ Item {
             color: Color.background
             focus: true
             Keys.onPressed: function(event) {
+                if (root.signatureOptions || root.stampOptions) return;
                 if (event.modifiers & Qt.ControlModifier) {
                     if (event.key === Qt.Key_O) { root.choosePdf(); event.accepted = true; }
                     else if (event.key === Qt.Key_S && document.loaded) { pageCanvas.finishText(true); root.exportOptions = true; event.accepted = true; }
@@ -180,14 +192,22 @@ Item {
                     visible: document.loaded
                     spacing: Style.space(6)
                     Repeater {
-                        model: [{id:"select",label:"Select"},{id:"ink",label:"Sign / draw"},{id:"text",label:"Text"},{id:"highlight",label:"Highlight"},{id:"box",label:"Box"}]
+                        model: [{id:"select",label:"Select"},{id:"signature",label:"Signature"},{id:"stamp",label:"Stamp"},{id:"ink",label:"Draw"},{id:"text",label:"Text"},{id:"highlight",label:"Highlight"},{id:"box",label:"Box"}]
                         delegate: Button {
                             required property var modelData
+                            objectName: "tool-" + modelData.id
                             text: modelData.label
                             selected: root.tool === modelData.id
                             focusable: true
                             enabled: !document.busy
-                            onClicked: { root.tool = modelData.id; if (modelData.id === "highlight") root.ink = "#efcb43"; else if (root.ink === "#efcb43") root.ink = "#153355"; }
+                            onClicked: {
+                                pageCanvas.finishText(true);
+                                if (modelData.id === "signature") { document.error=""; root.signatureOptions=true; return; }
+                                if (modelData.id === "stamp") { document.error=""; root.stampOptions=true; return; }
+                                root.tool=modelData.id;
+                                if (modelData.id === "highlight") root.ink = "#efcb43";
+                                else if (root.ink === "#efcb43") root.ink = "#153355";
+                            }
                         }
                     }
                     Button { text: "Undo"; focusable: true; enabled: !document.busy && document.undoStack.length > 0; onClicked: document.undo() }
@@ -425,6 +445,21 @@ Item {
                         }
                     }
                 }
+            }
+            SignatureDialog {
+                objectName: "signatureDialog"
+                anchors.fill: parent
+                visible: root.signatureOptions
+                document: root.document
+                onSubmitted: function(source, label) { root.imageLabel=label; root.document.prepareImage(source); }
+                onDismissed: root.signatureOptions=false
+            }
+            StampPicker {
+                anchors.fill: parent
+                visible: root.stampOptions
+                document: root.document
+                onSubmitted: function(source) { root.imageLabel="Stamp"; root.document.prepareImage(source); }
+                onDismissed: root.stampOptions=false
             }
         }
     }

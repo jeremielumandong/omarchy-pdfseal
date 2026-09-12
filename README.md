@@ -11,16 +11,18 @@ and controls. Document paper and ink retain their actual colors.
 ## Native features
 
 - Open ordinary or password-protected PDFs.
-- Draw signatures and freehand ink; add text, highlights and outline boxes.
-- Select, move and delete annotations; undo and redo.
+- Draw, type or import signatures; choose Script, Casual or Formal fonts.
+- Place approved/rejected/reviewed/draft/confidential/final and dated stamps.
+- Add text, freehand ink, highlights and outline boxes.
+- Select, move, resize and delete annotations; undo and redo.
 - View one page at a time, zoom, rotate, reorder and remove pages.
 - Export a new PDF with lossless compression and optional AES-256 password protection.
 - Preserve the original file; export refuses to overwrite it.
 
 This is the first native implementation of Privseal's core signing and
 annotation workflow. It does **not** yet include certificate-based digital
-seals, recipient fields and handoff packages, OCR, true redaction, image
-signatures, merging, or Office/image conversion. Drawn signatures are visual
+seals, recipient fields and handoff packages, OCR, true redaction,
+merging, or Office/image conversion. Drawn and typed signatures are visual
 annotations, not cryptographic signatures. Existing digital signatures do
 not survive editing. Text supports Windows-1252 (Western European)
 characters.
@@ -63,6 +65,13 @@ page. The tool returns to **Select**. Double-click existing text (or click
 **Escape** cancels; **Shift+Enter** adds a line. Empty text is discarded.
 Choose **Sans / Serif / Mono**, ink color, and **A− / A+** in the sidebar.
 Each finished text edit is a single undo step.
+
+**Signature** offers Draw, Type (Script / Casual / Formal), and local image
+import. Signature images keep transparency and remain reusable for this
+session. **Stamp** offers the same eight presets as Privseal, including dated
+Received and Approved. Drag a placed signature/stamp and resize with its
+bottom-right handle. Image input supports PNG, JPEG and WebP up to 32 MB and
+8192 pixels per side; prepared signatures are capped at 4096 pixels.
 
 **Export PDF** saves a new copy. An empty export password creates an
 unencrypted file, including when the input was encrypted.

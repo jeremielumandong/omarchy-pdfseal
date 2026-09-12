@@ -24,9 +24,11 @@ Item {
     property int previewPixels: 0
     property int serial: 0
     property var pendingOpen: null
+    property var pendingImage: null
+    property var savedSignatures: []
     property string savedState: ""
     property bool stopping: false
-    readonly property bool busy: operation === "open" || operation === "export"
+    readonly property bool busy: (operation !== "" && operation !== "render") || pendingImage !== null
     readonly property var page: pages.length ? pages[Math.min(current, pages.length - 1)] : null
     readonly property bool loaded: pages.length > 0
     readonly property bool dirty: loaded && snapshot() !== savedState
@@ -34,6 +36,7 @@ Item {
     readonly property int desiredPixels: Math.min(2600, Math.max(1200, Math.round(1600 * zoom / 200) * 200))
     signal exported(string path)
     signal stopped()
+    signal imagePrepared(var asset)
 
     function filePath(url) {
         var text = url.toString();
@@ -98,6 +101,31 @@ Item {
         marks = next;
     }
     function updateSelectedText(text, size, font, color) { updateText(selected, text, size, font, color); }
+    function addImage(asset) {
+        if (busy || !page) return;
+        var w = 0.32;
+        var h = w * page.width * asset.height / asset.width / page.height;
+        if (h > 0.35) { w *= 0.35 / h; h = 0.35; }
+        addMark({kind:"image",color:"#000000",size:1,x:(1-w)/2,y:0.3,w:w,h:h,dataUrl:asset.dataUrl});
+        status = "Drag to move; use the corner handle to resize.";
+    }
+    function resizeMark(index, dw, dh) {
+        var mark = marks[index];
+        if (busy || !mark || ["image", "box", "highlight"].indexOf(mark.kind) < 0) return;
+        var w = Math.max(0.01, Math.min(1 - mark.x, mark.w + dw));
+        var h = Math.max(0.01, Math.min(1 - mark.y, mark.h + dh));
+        if (w === mark.w && h === mark.h) return;
+        remember();
+        var next = marks.slice();
+        next[index] = Object.assign({}, mark, {w:w,h:h});
+        marks = next;
+    }
+    function prepareImage(source) {
+        if (!loaded || busy) return;
+        error = "";
+        pendingImage = {source: source};
+        pump();
+    }
     function moveMark(index, dx, dy) {
         if (busy || index < 0 || (!dx && !dy)) return;
         var next = JSON.parse(JSON.stringify(marks));
@@ -170,6 +198,11 @@ Item {
             pendingOpen = null;
             status = "Opening PDF…";
             request("open", next);
+        } else if (pendingImage) {
+            var image = pendingImage;
+            pendingImage = null;
+            status = "Preparing image…";
+            request("image", image);
         } else if (page && (previewPage !== page.number || previewPixels !== desiredPixels)) {
             request("render", {page: page.number, pixels: desiredPixels});
         }
@@ -185,6 +218,7 @@ Item {
         if (busy) return;
         stopping = true;
         pendingOpen = null;
+        pendingImage = null;
         if (worker.running) worker.stdinEnabled = false;
         else stopped();
     }
@@ -217,6 +251,8 @@ Item {
                 previewPage = result.page;
                 previewPixels = result.pixels;
             }
+        } else if (message.op === "image") {
+            imagePrepared(result);
         } else if (message.op === "export") {
             savedState = snapshot();
             status = "Saved " + result.path.split("/").pop();
