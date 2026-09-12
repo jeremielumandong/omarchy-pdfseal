@@ -23,18 +23,22 @@ and controls. Document paper and ink retain their actual colors.
 - Export a new PDF with optional AES-256 protection, preserving the original file.
 - Pinch or Ctrl+wheel to zoom, and follow Omarchy theme changes automatically.
 
-Certificate-based digital seals, recipient fields, handoff packages are still being ported. Drawn and typed signatures
-are visual annotations. Office conversion is unavailable in the reference
+Recipient fields support signatures, initials, dates, names, text and
+checkboxes, with signing order, guided filling and offline handoff PDFs.
+Finalization can append a Certificate of Completion and add a detached
+SHA-256 CMS digital seal using a local self-signed certificate or a .p12/.pfx.
+Drawn and typed signatures placed with the Signature tool are visual annotations.
+Office conversion is unavailable in the reference
 Privseal implementation. Text annotations support Windows-1252 characters;
 comments support Unicode.
 
 ## Install
 
-Requires Omarchy's Quickshell plugin system, `qpdf`, `poppler`, and Python 3
+Requires Omarchy's Quickshell plugin system, `qpdf`, `poppler`, `openssl`, and Python 3
 for installation. Install missing PDF dependencies with:
 
 ```sh
-omarchy pkg add qpdf poppler
+omarchy pkg add qpdf poppler openssl
 # For local English OCR:
 omarchy pkg add tesseract tesseract-data-eng
 ```
@@ -194,3 +198,32 @@ Pinch the PDF to zoom, or use Ctrl+mouse wheel. Clicking an object gives it keyb
 **Custom color…** opens a movable picker with a draggable shade area, hue slider and hex input. Choose **Eyedropper from PDF**, then click the page to match its color. The chosen color updates selected text or becomes the ink for new text and drawings; Escape cancels sampling.
 
 **Fill forms** shows interactive fields in Select mode. Text edits are grouped into one undo step. Read-only fields remain locked. When no interactive fields exist, PDFSeal detects light boxes and underlines on unrotated vector pages; this is a heuristic, so use Text for missed regions. Export keeps interactive fields editable; **Tools → Flatten forms** makes their appearances permanent.
+
+## Offline signing
+
+Choose **Signing → Prepare fields**, add recipients in order, choose a field
+type, and drag boxes on the page. Select a field to toggle Required or delete
+it; drag to move it and use its corner to resize. Arrange pages before adding
+signing fields. Clear the signing setup to make further structural changes.
+
+**Fill in order → Next required** guides each recipient through their fields.
+Signatures and initials use the same Draw / Type / Upload picker. **Save
+handoff PDF** embeds the editable fields and activity log, without baking their
+values, so the next recipient can reopen it in PDFSeal or Privseal. Deliver
+that file through your own channel; the plugin never sends it. Other PDF
+viewers do not display the pending signing fields. Handoff packages are
+editable and become tamper evident only after finalization.
+
+**Finalize and seal** requires all required fields to be filled, flattens form
+values, optionally appends a Certificate of Completion, and adds the digital
+seal last. **Export PDF → Digital seal…** also seals documents with ordinary
+annotations. Self-signed certificates establish tamper evidence, with
+self-asserted identity and device-clock timestamps. Imported certificate trust
+is determined by the recipient's viewer. Existing digital signatures cannot
+be resealed. Digital seals and handoff exports use unencrypted PDFs.
+
+Certificate keys stay in worker memory and certificate passwords travel over
+stdin. The OpenSSL runtime is required (provided by Arch's `openssl` package).
+No key files are generated for self-signed seals. Tests independently verify
+seals with Poppler `pdfsig`, including tampered bytes and password-protected
+PKCS#12 import.

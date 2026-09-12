@@ -12,6 +12,10 @@ Item {
     property bool exportOptions: false
     property bool openOptions: false
     property bool signatureOptions: false
+    property bool finalizeOptions:false
+    property string signingTarget:""
+    property var fieldTarget:null
+    property bool fieldOptions:false
     property bool colorOptions: false
     property string previousColorTool: "select"
     property bool stampOptions: false
@@ -82,12 +86,13 @@ Item {
         target: document
         function onPasswordNeeded(path) { root.pickedPath=path; root.openOptions=true; }
         function onImagePrepared(asset) {
-            document.addImage(asset);
+            if(root.signingTarget){document.signing.fill(root.signingTarget,{kind:"image",dataUrl:asset.dataUrl});root.signingTarget="";}
+            else document.addImage(asset);
             if (root.imageLabel !== "Stamp" && root.imageLabel !== "Saved")
                 document.savedSignatures = [Object.assign({},asset,{label:root.imageLabel})].concat(document.savedSignatures).slice(0,20);
             root.signatureOptions = false;
             root.stampOptions = false;
-            root.tool = "select";
+            root.tool = document.signing.mode ? "signing" : "select";
         }
         function onSelectedMarkChanged() {
             if (!root.selectedText) return;
@@ -95,6 +100,16 @@ Item {
             root.textSize = mark.size;
             root.textFont = mark.font || "sans";
             root.ink = mark.color;
+        }
+    }
+    Connections {
+        target:document.signing
+        function onModeChanged(){if(document.signing.mode){root.tool="signing";}else if(root.tool==="signing")root.tool="select";}
+        function onFillRequested(field){
+            root.fieldTarget=field;document.error="";
+            if(field.type==="signature" || field.type==="initial"){root.signingTarget=field.id;root.signatureOptions=true;}
+            else if(field.type==="checkbox")document.signing.fill(field.id,{kind:"check",checked:!(field.value && field.value.checked)});
+            else {fieldValue.text=field.value ? field.value.text : field.type==="date" ? Qt.formatDateTime(new Date(),"yyyy-MM-dd") : field.type==="name" ? document.signing.recipients.find(function(r){return r.id===field.recipientId;}).name : "";root.fieldOptions=true;fieldValue.forceActiveFocus();}
         }
     }
     function close() {
@@ -137,7 +152,7 @@ Item {
         defaultSuffix: "pdf"
         nameFilters: ["PDF documents (*.pdf)"]
         onAccepted: {
-            document.exportDocument(document.filePath(selectedFile), root.compress, exportPassword.text);
+            document.exportDocument(document.filePath(selectedFile), root.compress, document.signing.recipients.length ? "" : exportPassword.text);
             exportPassword.text = "";
             root.exportOptions = false;
         }
@@ -173,7 +188,7 @@ Item {
             color: Color.background
             focus: true
             Keys.onPressed: function(event) {
-                if (root.signatureOptions || root.stampOptions || root.colorOptions || root.toolsOptions || root.noteOptions) return;
+                if (root.signatureOptions || root.stampOptions || root.colorOptions || root.toolsOptions || root.noteOptions || root.fieldOptions || root.finalizeOptions) return;
                 if (event.modifiers & Qt.ControlModifier) {
                     if (event.key===Qt.Key_F) {root.findOptions=true;Qt.callLater(function(){findText.forceActiveFocus();});event.accepted=true;}
                     else if (event.key === Qt.Key_O) { root.choosePdf(); event.accepted = true; }
@@ -227,12 +242,14 @@ Item {
                         }
                     }
                     Button{visible:document.formFields.length>0;text:document.showForms ? "Hide form fields" : "Fill forms";onClicked:{document.showForms=!document.showForms;root.tool="select";}}
+                    Button{objectName:"openSigning";text:"Signing";onClicked:{pageCanvas.finishText(true);document.signing.mode=document.signing.mode || "prepare";root.tool="signing";}}
                     Button {text:"Find";onClicked:{root.findOptions=!root.findOptions;if(root.findOptions)findText.forceActiveFocus();}}
                     Button { objectName:"openDocumentTools"; text:"Tools"; enabled:!document.busy; onClicked:{pageCanvas.finishText(true);root.toolsOptions=true;} }
                     Button { text: "Undo"; focusable: true; enabled: !document.busy && document.undoStack.length > 0; onClicked: {pageCanvas.finishText(true);document.undo();} }
                     Button { text: "Redo"; focusable: true; enabled: !document.busy && document.redoStack.length > 0; onClicked: {pageCanvas.finishText(true);document.redo();} }
                     Button { text: "Remove mark"; focusable: true; enabled: !document.busy && document.selected >= 0; onClicked: {pageCanvas.finishText(false);document.removeMark();} }
                 }
+                SigningPanel {width:parent.width;visible:document.signing.mode!=="";document:root.document;onExportRequested:function(finalize){pageCanvas.finishText(true);if(finalize)root.finalizeOptions=true;else {exportPassword.text="";root.exportOptions=true;}}}
                 Row {
                     visible:root.findOptions && document.loaded
                     width:parent.width;spacing:8
@@ -490,9 +507,10 @@ Item {
                             text: root.confirmDiscard ? "Your original file is unchanged. Export first to keep your edits." : root.openOptions ? "This PDF requires a password to open." : "Save a new copy with your signatures, annotations and page changes."
                         }
                         TextField { id: openPassword; width: parent.width; visible: root.openOptions; password: true; placeholderText: "Password (optional)" }
-                        TextField { id: exportPassword; width: parent.width; visible: root.exportOptions; password: true; placeholderText: "Protect with a password (optional)" }
+                        TextField { id: exportPassword; width: parent.width; visible: root.exportOptions && !document.signing.recipients.length; password: true; placeholderText: "Protect with a password (optional)" }
+                        Button{width:parent.width;visible:root.exportOptions;text:"Digital seal…";enabled:document.signing.complete;onClicked:{root.exportOptions=false;root.finalizeOptions=true;}}
                         Button { width: parent.width; visible: root.exportOptions; text: "Lossless compression"; selected: root.compress; onClicked: root.compress = !root.compress }
-                        Label { width: parent.width; visible: root.exportOptions; text: "Leaving the password empty creates an unencrypted copy."; opacity: 0.7; font.pixelSize: Style.font.bodySmall }
+                        Label { width: parent.width; visible: root.exportOptions; text: document.signing.recipients.length ? "This saves an editable signing package. Open it in PDFSeal or Privseal to continue. Use Signing → Finalize and seal for the finished document." : "Leaving the password empty creates an unencrypted copy."; opacity: 0.7; font.pixelSize: Style.font.bodySmall }
                         Row {
                             spacing: Style.space(8)
                             Button {
@@ -517,6 +535,19 @@ Item {
                                 }
                             }
                         }
+                    }
+                }
+            }
+            FinalizeDialog {anchors.fill:parent;visible:root.finalizeOptions;document:root.document;onDismissed:root.finalizeOptions=false}
+            Rectangle {
+                anchors.fill:parent;visible:root.fieldOptions;color:Qt.rgba(0,0,0,0.55)
+                MouseArea{anchors.fill:parent}
+                Rectangle {
+                    anchors.centerIn:parent;width:Math.min(parent.width-40,500);height:fieldColumn.implicitHeight+40;color:Color.background;border.color:Color.accent;radius:Style.cornerRadius
+                    Column{id:fieldColumn;anchors.centerIn:parent;width:parent.width-40;spacing:12
+                        Label{text:root.fieldTarget ? "Fill "+root.fieldTarget.type : "Fill field"}
+                        TextField{id:fieldValue;objectName:"signingFieldValue";width:parent.width;placeholderText:"Field value";onAccepted:fieldSave.clicked()}
+                        Row{spacing:8;Button{text:"Cancel";onClicked:root.fieldOptions=false}Button{id:fieldSave;objectName:"saveSigningField";text:"Save field";selected:true;enabled:fieldValue.text.trim()!=="";onClicked:{if(!fieldValue.text.trim())return;document.signing.fill(root.fieldTarget.id,{kind:"text",text:fieldValue.text.trim()});root.fieldOptions=false;}}}
                     }
                 }
             }
@@ -549,7 +580,7 @@ Item {
                 visible: root.signatureOptions
                 document: root.document
                 onSubmitted: function(source, label) { root.imageLabel=label; root.document.prepareImage(source); }
-                onDismissed: root.signatureOptions=false
+                onDismissed:{root.signatureOptions=false;root.signingTarget="";}
             }
             StampPicker {
                 anchors.fill: parent

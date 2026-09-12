@@ -35,6 +35,8 @@ Item {
     property var formValues: ({})
     property string formEditName: ""
     property bool showForms: true
+    property alias signing: signing
+    SigningController {id:signing;document:root}
     property var textLines: []
     property int textPage: 0
     property bool textRequested: false
@@ -64,7 +66,7 @@ Item {
     function fileUrl(path) {
         return "file://" + path.split("/").map(function(part) { return encodeURIComponent(part); }).join("/");
     }
-    function snapshot() { return JSON.stringify({pages: pages, marks: marks, revision: revision,formValues:formValues}); }
+    function snapshot() { return JSON.stringify({pages: pages, marks: marks, revision: revision,formValues:formValues,signing:signing.manifest()}); }
     function remember() {
         formEditName="";
         undoStack = undoStack.concat([snapshot()]).slice(-100);
@@ -76,6 +78,7 @@ Item {
         marks = state.marks;
         revision = state.revision || 0;
         formValues=state.formValues || {};formEditName="";
+        var previousMode=signing.mode;signing.hydrate(state.signing,false);signing.mode=previousMode;
         current = Math.min(current, pages.length - 1);
         selected = -1;
     }
@@ -210,6 +213,7 @@ Item {
         marks = next;
     }
     function rotatePage() {
+        if(!canChangePages())return;
         if (busy || !page) return;
         remember();
         var next = pages.slice();
@@ -219,6 +223,7 @@ Item {
         pages = next;
     }
     function movePage(delta) {
+        if(!canChangePages())return;
         var target = current + delta;
         if (busy || target < 0 || target >= pages.length) return;
         remember();
@@ -229,6 +234,7 @@ Item {
         current = target;
     }
     function removePage() {
+        if(!canChangePages())return;
         if (busy || pages.length <= 1) return;
         remember();
         var removed = page.number;
@@ -284,7 +290,9 @@ Item {
             request("render", {page: page.number, pixels: desiredPixels});
         } else if (page && textRequested && textPage!==page.number) request("text",{page:page.number});
     }
+    function canChangePages(){if(signing.fields.length){error="Export or clear the signing setup before changing page structure.";return false;}return true;}
     function apply(action, options) {
+        if(!canChangePages())return;
         if (!loaded || busy) return;
         error = "";
         progress = 0;
@@ -302,13 +310,13 @@ Item {
         worker.write(JSON.stringify({op:"cancel",target:serial}) + "\n");
         status = "Cancelling…";
     }
-    function exportDocument(path, compress, password) {
+    function exportDocument(path, compress, password, options) {
         finishFormEdit();
         if (!loaded || busy) return;
         if (operation !== "") { error = "Wait for the page preview to finish, then export."; return; }
         error = "";
         status = "Exporting PDF…";
-        request("export", {path: path, pages: pages, marks: marks, compress: compress, password: password,keepAttachments:keepAttachments,formValues:formValues});
+        request("export", Object.assign({path: path, pages: pages, marks: marks, compress: compress, password: password,keepAttachments:keepAttachments,formValues:formValues,signing:signing.recipients.length ? signing.manifest() : null},options || {}));
     }
     function shutdown() {
         if (busy) return;
@@ -344,6 +352,7 @@ Item {
         var result = message.result;
         if (message.op === "open" || result.baked) {
             revision = result.baked ? revision + 1 : 0;
+            signing.hydrate(result.signing,true);
             compressionPreview = null;
             textPage=0;textLines=[];searchHits=[];searchIndex=-1;
             formFields=result.forms ? result.forms.fields : [];formValues=result.forms ? result.forms.values : {};formEditName="";

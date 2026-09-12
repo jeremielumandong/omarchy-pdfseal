@@ -26,6 +26,8 @@ mod images;
 mod jobs;
 mod operations;
 mod redaction;
+mod seal;
+mod signing;
 mod text;
 
 #[derive(Clone, Serialize)]
@@ -328,6 +330,13 @@ impl Session {
     }
 
     fn export(&self, request: &Value) -> Result<Value> {
+        let sealing = request["seal"].is_object();
+        if sealing && seal::has_signature(&self.document) {
+            return Err("This PDF already has a digital signature and cannot be resealed".into());
+        }
+        if sealing && request["password"].as_str().is_some_and(|s| !s.is_empty()) {
+            return Err("Leave PDF password protection empty when creating a digital seal".into());
+        }
         let output = PathBuf::from(required_str(request, "path")?);
         if !output.is_absolute() {
             return Err("Export requires an absolute file path".into());
@@ -336,7 +345,24 @@ impl Session {
             return Err("Choose a new filename to preserve the original PDF".into());
         }
         let pages: Vec<PageSelection> = serde_json::from_value(request["pages"].clone())?;
-        let marks: Vec<Mark> = serde_json::from_value(request["marks"].clone())?;
+        let mut marks: Vec<Mark> = serde_json::from_value(request["marks"].clone())?;
+        let manifest = &request["signing"];
+        let finalize = request["finalize"] == true;
+        if finalize && !sealing {
+            return Err("Finalizing requires a digital seal".into());
+        }
+        if manifest.is_object() {
+            signing::validate(manifest, &self.pages)?;
+            if request["password"].as_str().is_some_and(|s| !s.is_empty()) {
+                return Err("Leave PDF password protection empty for a signing package".into());
+            }
+            if finalize {
+                if !signing::complete(manifest) {
+                    return Err("Fill every required signing field before finalizing".into());
+                }
+                marks.extend(signing::marks(manifest, &self.pages)?);
+            }
+        }
         if pages.is_empty() {
             return Err("Keep at least one page".into());
         }
@@ -352,6 +378,10 @@ impl Session {
         }
         let mut doc = self.document.clone();
         forms::fill(&mut doc, &self.pages, &request["formValues"])?;
+        doc.catalog_mut()?.remove(b"PrivSealSigningManifest");
+        if sealing || finalize {
+            forms::prepare_flatten(&mut doc, &self.pages)?;
+        }
         for page in &self.pages {
             let mut page_marks = marks
                 .iter()
@@ -388,6 +418,11 @@ impl Session {
             "inputFile": annotated, "outputFile": temporary.path(),
             "pages": [{ "file": ".", "range": range }], "rotate": rotations
         });
+        if sealing || finalize {
+            job["generateAppearances"] = json!("");
+            job["flattenAnnotations"] = json!("all");
+            job["removeAcroform"] = json!("");
+        }
         if request["compress"].as_bool().unwrap_or(false) {
             job["objectStreams"] = json!("generate");
             job["compressStreams"] = json!("y");
@@ -412,6 +447,17 @@ impl Session {
                 json!({ "userPassword": password, "ownerPassword": password, "256bit": {} });
         }
         qpdf(job)?;
+        if manifest.is_object() {
+            let remapped = signing::remap(manifest, &pages);
+            if !finalize {
+                signing::embed(temporary.path(), &remapped)?;
+            } else if request["certificate"] == true {
+                signing::certificate(temporary.path(), &remapped)?;
+            }
+        }
+        if sealing {
+            seal::sign(temporary.path(), &request["seal"])?;
+        }
         jobs::check()?;
         temporary.as_file().sync_all()?;
         let bytes = temporary.as_file().metadata()?.len();
@@ -666,7 +712,7 @@ fn dispatch(session: &mut Option<Session>, request: &Value) -> Result<Value> {
             next.source = fs::canonicalize(paths[0].as_str().ok_or("Invalid image path")?)?
                 .with_file_name("images.pdf");
             jobs::check()?;
-            let result = json!({"pages":next.pages,"path":next.source,"baked":true,"forms":forms::metadata(&next.document,&next.pages)?});
+            let result = json!({"pages":next.pages,"path":next.source,"baked":true,"forms":forms::metadata(&next.document,&next.pages)?,"signing":signing::read(&next.document,&next.pages)});
             *session = Some(next);
             Ok(result)
         }
@@ -675,7 +721,7 @@ fn dispatch(session: &mut Option<Session>, request: &Value) -> Result<Value> {
                 required_str(request, "path")?,
                 request["password"].as_str().unwrap_or(""),
             )?;
-            let result = json!({ "pages": next.pages, "path": next.source, "forms":forms::metadata(&next.document,&next.pages)? });
+            let result = json!({ "pages": next.pages, "path": next.source, "forms":forms::metadata(&next.document,&next.pages)?,"signing":signing::read(&next.document,&next.pages) });
             jobs::check()?;
             *session = Some(next);
             Ok(result)

@@ -15,7 +15,8 @@ ShellRoot {
     property string previousWorkspace: ""
     readonly property string focusWorkspace: "pdfseal-smoke-" + Date.now()
     readonly property string testDir: Quickshell.env("PDFSEAL_TEST_DIR")
-    TestEvent { id: input }
+    property var input: null
+    Component {id:eventFactory;TestEvent {}}
     function findItem(item, name) {
         if (item.objectName === name) return item;
         var children = item.children || [];
@@ -36,6 +37,7 @@ ShellRoot {
         throw new Error("Missing control: " + name);
     }
     function click(item, x, y) {
+        if(item.Window && item.Window.window)item.Window.window.requestActivate();
         if (!input.mouseClick(item, x, y, Qt.LeftButton, Qt.NoModifier, 0)) throw new Error("Click failed");
     }
     function typeText(text) {
@@ -100,6 +102,7 @@ ShellRoot {
         interval: 100
         repeat: true
         onTriggered: {
+            try {
             var doc = nativeEditor.document;
             if (doc.error) throw new Error(doc.error);
             if (phase === 0 && doc.preview && doc.operation === "") {
@@ -111,6 +114,7 @@ ShellRoot {
                 nativeEditor.tool = "text";
                 // Real pointer and key events: click first, then type, without a second page click.
                 var pageInput = control("pageInput");
+                if(!input)input=eventFactory.createObject(pageInput);
                 click(pageInput, pageInput.width * 0.1, pageInput.height * 0.3);
                 if (!control("inlineTextEditor").activeFocus || nativeEditor.tool !== "select") throw new Error("Page click did not enter inline editing");
                 typeText("Signed");
@@ -291,8 +295,8 @@ ShellRoot {
                         if (item.contentItem && item.title !== undefined && String(item.title).endsWith("PDFSeal")) {
                             item.contentItem.children[0].grabToImage(function(result) {
                                 result.saveToFile(capturePath);
-                                nativeEditor.close();
-                                phase = 2;
+                                nativeEditor.openedPdf(testDir+"/encrypted.pdf");
+                                phase = 18;
                             });
                             phase = 3;
                             return;
@@ -348,7 +352,50 @@ ShellRoot {
             } else if (phase===36) {
                 if(doc.formValues.Agree!=="" || doc.formValues.Choice!=="Two" || doc.formValues.Select!=="Beta") throw new Error("Form choices did not update");
                 doc.exportDocument(testDir+"/filled-form.pdf",false,"");phase=37;
-            } else if (phase===37 && doc.status.startsWith("Saved ")) {nativeEditor.close();phase=2;
+            } else if (phase===37 && doc.status.startsWith("Saved ")) {
+                click(control("openSigning"),20,10);phase=47;
+            } else if(phase===47){
+                var recipient=control("recipientName");click(recipient,20,10);typeText("Ada Test");
+                if(recipient.text!=="Ada Test")throw new Error("Recipient typing failed: value="+recipient.text+" focus="+recipient.activeFocus+" visible="+recipient.visible+" enabled="+recipient.enabled+" mode="+doc.signing.mode+" x="+recipient.x+" y="+recipient.y+" tools="+nativeEditor.toolsOptions+" form="+doc.formValues.Select);
+                click(control("addRecipient"),20,10);
+                click(control("fieldType-name"),20,10);phase=44;
+            } else if(phase===44){
+                var placement=control("signingPageInput");input.mousePress(placement,placement.width*0.3,placement.height*0.25,Qt.LeftButton,Qt.NoModifier,0);input.mouseMove(placement,placement.width*0.7,placement.height*0.31,10,Qt.LeftButton,Qt.NoModifier);input.mouseRelease(placement,placement.width*0.7,placement.height*0.31,Qt.LeftButton,Qt.NoModifier,0);
+                if(doc.signing.fields.length!==1 || doc.signing.recipients.length!==1)throw new Error("Signing field placement failed: "+doc.signing.fields.length+" fields, "+doc.signing.recipients.length+" recipients, mode="+doc.signing.mode+", tool="+nativeEditor.tool+", size="+placement.width+"x"+placement.height);
+                phase=45;
+            } else if(phase===45){
+                var placed=doc.signing.fields[0];var box=control("signingField-"+placed.id);
+                input.mousePress(box,10,10,Qt.LeftButton,Qt.NoModifier,0);input.mouseMove(box,30,25,0,Qt.LeftButton,Qt.NoModifier);input.mouseRelease(box,30,25,Qt.LeftButton,Qt.NoModifier,0);
+                if(doc.signing.fields[0].xN<=placed.xN)throw new Error("Signing field did not move");
+                doc.undo();phase=46;
+            } else if(phase===46){
+                var box=control("signingField-"+doc.signing.fields[0].id);click(box,10,10);input.keyClick(Qt.Key_Delete,Qt.NoModifier,0);
+                if(doc.signing.fields.length)throw new Error("Selected signing field was not deleted");
+                doc.undo();
+                doc.signing.addRecipient("Second Test");doc.signing.addField(0.3,0.36,0.4,0.06);
+                if(doc.signing.canSign(doc.signing.activeRecipient))throw new Error("Signing order did not gate later recipient");
+                doc.signing.mode="sign";doc.signing.requestFill(doc.signing.fields[0].id);phase=38;
+            } else if (phase===38 && nativeEditor.fieldOptions) {
+                var value=control("signingFieldValue");click(value,20,10);input.keyClick(Qt.Key_A,Qt.ControlModifier,0);typeText("Ada Signed");click(control("saveSigningField"),20,10);
+                if(doc.formValues.Select!=="Beta" || doc.signing.recipients[0].name!=="Ada Test")throw new Error("Signing preparation changed form data or recipient name");
+                if(doc.signing.audit.length!==1 || !doc.signing.canSign(doc.signing.recipients[1].id))throw new Error("Signing value or order failed");
+                doc.exportDocument(testDir+"/handoff.pdf",false,"");phase=39;
+            } else if(phase===39 && doc.status.startsWith("Saved ")){nativeEditor.openedPdf(testDir+"/handoff.pdf");phase=40;
+            } else if(phase===40 && doc.fileName==="handoff.pdf" && doc.preview && !doc.busy){
+                if(doc.signing.fields.length!==2 || doc.signing.fields[0].value.text!=="Ada Signed" || doc.signing.audit.length!==1 || doc.signing.mode!=="sign")throw new Error("Offline signing package did not resume");
+                doc.signing.nextField();phase=41;
+            } else if(phase===41 && nativeEditor.fieldOptions){
+                click(control("saveSigningField"),20,10);
+                if(!doc.signing.complete || doc.signing.audit.length!==2)throw new Error("Guided signing did not complete");
+                nativeEditor.finalizeOptions=true;phase=42;
+            } else if(phase===42){
+                var signer=control("sealSigner");click(signer,20,10);typeText("PDFSeal UI Test");
+                if(!control("saveSealedPdf").enabled)throw new Error("Finalize dialog not ready");
+                nativeEditor.finalizeOptions=false;
+                var capture=Quickshell.env("PDFSEAL_CAPTURE");
+                if(capture){for(var i=0;i<nativeEditor.data.length;i++){var window=nativeEditor.data[i];if(window.contentItem && window.title!==undefined && String(window.title).endsWith("PDFSeal")){window.contentItem.children[0].grabToImage(function(result){result.saveToFile(capture+".signing.png");});break;}}}
+                doc.exportDocument(testDir+"/sealed-workflow.pdf",true,"",{finalize:true,certificate:true,seal:{name:"PDFSeal UI Test",reason:"UI verification"}});phase=43;
+            } else if(phase===43 && doc.status.startsWith("Saved ")){nativeEditor.close();phase=2;
             } else if (phase === 2 && !doc.ready && !doc.loaded) {
                 input.mouseClick(widget,widget.width/2,widget.height/2,Qt.RightButton,Qt.NoModifier,0);
                 phase=20;
@@ -368,9 +415,10 @@ ShellRoot {
                     ? 'hl.dsp.focus({ workspace = ' + JSON.stringify("name:" + previousWorkspace) + ' })'
                     : "workspace name:" + previousWorkspace);
                 if (previousToplevel) previousToplevel.activate();
-                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, comments, PDF text replacement, page duplication, search, interactive form text/checkbox/radio/dropdown, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
+                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, comments, PDF text replacement, page duplication, search, interactive form text/checkbox/radio/dropdown, recipient order, field placement, offline handoff, guided fill and digital seal, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
+            } catch(error) {console.error("FAIL phase "+phase+": "+error);stop();for(var i=0;i<nativeEditor.data.length;i++){var window=nativeEditor.data[i];if(window.contentItem && window.title!==undefined && String(window.title).endsWith("PDFSeal")){window.contentItem.children[0].grabToImage(function(result){result.saveToFile("/tmp/pdfseal-ui-failure.png");Qt.quit();});return;}}Qt.quit();}
         }
     }
 }

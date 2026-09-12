@@ -388,7 +388,7 @@ pub fn adopt(session: &mut Session, path: &Path) -> Result<Value> {
     let mut next = Session::open(path.to_str().ok_or("Invalid PDF path")?, "")?;
     next.source = session.source.clone();
     jobs::check()?;
-    let result = json!({"pages":next.pages,"path":next.source,"baked":true,"forms":forms::metadata(&next.document,&next.pages)?});
+    let result = json!({"pages":next.pages,"path":next.source,"baked":true,"forms":forms::metadata(&next.document,&next.pages)?,"signing":signing::read(&next.document,&next.pages)});
     *session = next;
     Ok(result)
 }

@@ -4,7 +4,7 @@
   "name": "PDFSeal",
   "version": "1.0.0",
   "author": "arkane",
-  "description": "Native local PDF signing, annotation, page tools, OCR, verified redaction, compression and password protection.",
+  "description": "Native PDF editing, interactive forms, offline signing and digital seals, OCR, redaction and page tools.",
   "kinds": ["bar-widget"],
   "entryPoints": { "barWidget": "Widget.qml" },
   "barWidget": {

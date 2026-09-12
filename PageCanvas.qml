@@ -205,7 +205,7 @@ Item {
     MouseArea {
         objectName: "pageInput"
         anchors.fill: parent
-        enabled: root.available
+        enabled: root.available && root.tool!=="signing"
         cursorShape: root.tool === "select" ? Qt.ArrowCursor : Qt.CrossCursor
         property real startX: 0
         property real startY: 0
@@ -277,6 +277,7 @@ Item {
             }
         }
     }
+    SigningOverlay {anchors.fill:parent;document:root.document;visible:root.tool==="signing";enabled:root.available}
     FormOverlay {
         anchors.fill:parent
         visible:root.document.showForms && root.document.formFields.length>0 && root.tool==="select" && !root.textEditing
