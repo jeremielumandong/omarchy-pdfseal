@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install the prebuilt native plugin without root or source compilation."""
 import argparse
+import hashlib
 from datetime import datetime, timezone
 import json
 import os
@@ -11,6 +12,41 @@ import tempfile
 import time
 
 PLUGIN_ID = "arkane.pdfseal"
+
+
+def stage_runtime(staged):
+    """Give changed QML fresh URLs even if the shell retains its component cache."""
+    names = sorted(p.name for p in staged.iterdir() if p.suffix == '.qml' or p.name in ('bin', 'assets'))
+    fingerprint = hashlib.sha256()
+    for name in names:
+        entry = staged / name
+        files = sorted(entry.rglob('*')) if entry.is_dir() else [entry]
+        for path in files:
+            if path.is_file():
+                fingerprint.update(str(path.relative_to(staged)).encode())
+                fingerprint.update(b'\0')
+                fingerprint.update(path.read_bytes())
+    runtime = staged / ('app-' + fingerprint.hexdigest()[:16])
+    runtime.mkdir()
+    for name in names:
+        entry = staged / name
+        if entry.is_dir():
+            shutil.copytree(entry, runtime / name)
+        else:
+            shutil.copy2(entry, runtime / name)
+    manifest_path = staged / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    manifest['entryPoints']['barWidget'] = runtime.name + '/Widget.qml'
+    manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
+    return runtime
+
+
+def ensure_editor_saved():
+    result = subprocess.run(['hyprctl', '-j', 'clients'], check=True, capture_output=True, text=True, timeout=5)
+    for client in json.loads(result.stdout):
+        title = client.get('title', '')
+        if client.get('class') == 'org.quickshell' and title.endswith('PDFSeal') and title.startswith('• '):
+            raise RuntimeError('Export and close your unsaved PDFSeal document before updating.')
 
 
 def enable_plugin():
@@ -51,13 +87,17 @@ def install():
     data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
     state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
     destination = config / "omarchy/plugins" / PLUGIN_ID
+    if destination.exists() and not args.no_enable:
+        ensure_editor_saved()
     destination.parent.mkdir(parents=True, exist_ok=True)
     # Stage outside the discovery directory; the shell never sees partial QML.
     with tempfile.TemporaryDirectory(prefix="pdfseal-install-", dir=config) as scratch:
         staged = Path(scratch) / PLUGIN_ID
         staged.mkdir()
-        for name in ("Widget.qml", "Editor.qml", "DocumentController.qml", "PageCanvas.qml", "manifest.json", "README.md", "icon.svg"):
+        for name in [p.name for p in source.glob('*.qml')] + ["manifest.json", "README.md", "icon.svg"]:
             shutil.copy2(source / name, staged / name)
+        if (source / 'assets').is_dir():
+            shutil.copytree(source / 'assets', staged / 'assets')
         (staged / "bin").mkdir()
         shutil.copy2(worker, staged / "bin/pdfseal-worker")
         notices = source / "bin/THIRD_PARTY_NOTICES.txt"
@@ -65,6 +105,7 @@ def install():
             shutil.copy2(notices, staged / "bin/THIRD_PARTY_NOTICES.txt")
         (staged / "scripts").mkdir()
         shutil.copy2(source / "scripts/uninstall.py", staged / "scripts/uninstall.py")
+        stage_runtime(staged)
         if shutil.which("omarchy"):
             subprocess.run(["omarchy", "plugin", "validate", str(staged)], check=True)
         backup = None

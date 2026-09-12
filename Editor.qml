@@ -17,8 +17,9 @@ Item {
     property string ink: "#153355"
     property real penSize: 2
     property real textSize: 18
-    property var pendingTextPosition: null
-    readonly property bool editingText: document.selectedMark !== null && document.selectedMark.kind === "text"
+    property string textFont: "sans"
+    readonly property bool selectedText: document.selectedMark !== null && document.selectedMark.kind === "text"
+    readonly property bool editingText: selectedText || pageCanvas.textEditing
     property bool compress: true
     // Public for the integration smoke test and host introspection.
     readonly property color themeBackground: Color.background
@@ -55,46 +56,37 @@ Item {
         repeat: true
         onTriggered: if (!root.opened || root.activateWindow() || ++attempts >= 20) stop()
     }
-    function placeText(x, y) {
-        if (document.busy || !document.page) return;
-        document.selected = -1;
-        pendingTextPosition = {x: x, y: y};
-        editText(annotationText.text);
-        annotationText.forceActiveFocus();
-        annotationText.selectAll();
+    function changeTextFont(font) {
+        textFont = font;
+        if (selectedText) document.updateSelectedText(document.selectedMark.text, textSize, textFont);
     }
-    function editText(text) {
-        if (document.busy) return;
-        if (editingText) document.updateSelectedText(text, textSize);
-        else if (pendingTextPosition && text.trim()) {
-            var position = pendingTextPosition;
-            pendingTextPosition = null;
-            document.addMark(document.textMark(position.x, position.y, text, textSize, ink));
-        }
+    function changeInk(color) {
+        ink = color;
+        if (selectedText) document.updateSelectedText(document.selectedMark.text, textSize, textFont, color);
     }
     function changeTextSize(delta) {
         textSize = Math.max(8, Math.min(72, textSize + delta));
-        if (editingText) document.updateSelectedText(annotationText.text, textSize);
+        if (selectedText) document.updateSelectedText(document.selectedMark.text, textSize, textFont);
     }
-    onToolChanged: pendingTextPosition = null
     Connections {
         target: document
-        function onPageChanged() { root.pendingTextPosition = null; }
         function onSelectedMarkChanged() {
-            if (!root.editingText) return;
-            root.pendingTextPosition = null;
+            if (!root.selectedText) return;
             var mark = document.selectedMark;
-            if (annotationText.text !== mark.text) annotationText.text = mark.text;
             root.textSize = mark.size;
+            root.textFont = mark.font || "sans";
+            root.ink = mark.color;
         }
     }
     function close() {
+        pageCanvas.finishText(true);
         if (document.busy) return;
         if (document.dirty) { nextAction = "close"; confirmDiscard = true; }
         else finishClose();
     }
     function finishClose() { document.shutdown(); opened = false; }
     function choosePdf() {
+        pageCanvas.finishText(true);
         if (document.dirty) { nextAction = "open"; confirmDiscard = true; }
         else pdfPicker.open();
     }
@@ -134,13 +126,14 @@ Item {
     }
     FloatingWindow {
         id: window
-        title: (document.dirty ? "• " : "") + (document.loaded ? document.fileName + " — " : "") + "PDFSeal"
+        title: (document.dirty || pageCanvas.textDraftDirty ? "• " : "") + (document.loaded ? document.fileName + " — " : "") + "PDFSeal"
         visible: root.opened
         implicitWidth: 1120
         implicitHeight: 800
         minimumSize: Qt.size(900, 620)
         color: Color.background
         onClosed: {
+            pageCanvas.finishText(true);
             if (document.busy || document.dirty) {
                 root.opened = false;
                 Qt.callLater(function() {
@@ -157,7 +150,7 @@ Item {
             Keys.onPressed: function(event) {
                 if (event.modifiers & Qt.ControlModifier) {
                     if (event.key === Qt.Key_O) { root.choosePdf(); event.accepted = true; }
-                    else if (event.key === Qt.Key_S && document.loaded) { root.exportOptions = true; event.accepted = true; }
+                    else if (event.key === Qt.Key_S && document.loaded) { pageCanvas.finishText(true); root.exportOptions = true; event.accepted = true; }
                     else if (event.key === Qt.Key_Z) {
                         if (event.modifiers & Qt.ShiftModifier) document.redo(); else document.undo();
                         event.accepted = true;
@@ -179,7 +172,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Button { id: openButton; text: "Open PDF"; focusable: true; bordered: true; enabled: !document.busy; onClicked: root.choosePdf() }
-                    Button { id: exportButton; text: "Export PDF"; focusable: true; selected: true; enabled: document.loaded && document.operation === ""; onClicked: root.exportOptions = !root.exportOptions }
+                    Button { id: exportButton; text: "Export PDF"; focusable: true; selected: true; enabled: document.loaded && document.operation === ""; onClicked: { pageCanvas.finishText(true); root.exportOptions = !root.exportOptions; } }
                     Button { id: closeButton; text: "Close"; focusable: true; enabled: !document.busy; onClicked: root.close() }
                 }
                 Flow {
@@ -229,7 +222,7 @@ Item {
                                     color: modelData
                                     border.width: root.ink === modelData ? 3 : 1
                                     border.color: root.ink === modelData ? Color.accent : Color.muted
-                                    MouseArea { anchors.fill: parent; onClicked: root.ink = parent.modelData }
+                                    MouseArea { anchors.fill: parent; onClicked: root.changeInk(parent.modelData) }
                                 }
                             }
                         }
@@ -239,18 +232,32 @@ Item {
                             Label { text: root.penSize.toFixed(1) + " pt"; anchors.verticalCenter: parent.verticalCenter }
                             Button { text: "+"; onClicked: root.penSize = Math.min(12, root.penSize + 0.5) }
                         }
-                        TextField {
-                            id: annotationText
-                            objectName: "annotationText"
+                        Button {
+                            objectName: "editSelectedText"
+                            width: parent.width
+                            visible: root.selectedText && !pageCanvas.textEditing
+                            enabled: !document.busy
+                            text: "Edit selected text"
+                            onClicked: pageCanvas.beginText(document.selected, 0, 0)
+                        }
+                        Flow {
                             width: parent.width
                             visible: root.tool === "text" || root.editingText
-                            enabled: !document.busy
-                            placeholderText: "Text to place"
-                            maximumLength: 160
-                            onTextEdited: root.editText(text)
+                            spacing: Style.space(3)
+                            Repeater {
+                                model: [{id:"sans",label:"Sans"},{id:"serif",label:"Serif"},{id:"mono",label:"Mono"}]
+                                delegate: Button {
+                                    required property var modelData
+                                    objectName: "font-" + modelData.id
+                                    text: modelData.label
+                                    selected: root.textFont === modelData.id
+                                    enabled: !document.busy
+                                    onClicked: root.changeTextFont(modelData.id)
+                                }
+                            }
                         }
                         Row {
-                            visible: annotationText.visible
+                            visible: root.tool === "text" || root.editingText
                             enabled: !document.busy
                             spacing: Style.space(6)
                             Button { objectName: "decreaseTextSize"; text: "A−"; onClicked: root.changeTextSize(-2) }
@@ -259,10 +266,10 @@ Item {
                         }
                         Label {
                             width: parent.width
-                            visible: annotationText.visible
+                            visible: root.tool === "text" || root.editingText
                             font.pixelSize: Style.font.bodySmall
                             opacity: 0.7
-                            text: root.editingText ? "Edit the selected text or change its size." : root.pendingTextPosition ? "Type to add text at the clicked position." : "Click the page to place text."
+                            text: pageCanvas.textEditing ? "Type on the page. Enter saves; Escape cancels." : root.selectedText ? "Double-click text to edit. Drag to move it." : "Click the page and start typing."
                         }
                         Label { text: "PAGES"; opacity: 0.6; font.pixelSize: Style.font.bodySmall }
                         ListView {
@@ -341,8 +348,9 @@ Item {
                                     tool: root.tool
                                     inkColor: root.ink
                                     strokeSize: root.penSize
-                                    onTextPlacementRequested: function(x, y) { root.placeText(x, y); }
-                                    onTextSelected: { annotationText.forceActiveFocus(); annotationText.selectAll(); }
+                                    textSize: root.textSize
+                                    textFont: root.textFont
+                                    onTextEditingStarted: root.tool = "select"
                                 }
                             }
                         }

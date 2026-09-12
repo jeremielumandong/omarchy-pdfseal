@@ -7,13 +7,46 @@ Item {
     property string tool: "ink"
     property string inkColor: "#153355"
     property real strokeSize: 2
+    property real textSize: 18
+    property string textFont: "sans"
+    property var textDraft: null
+    readonly property bool textEditing: textDraft !== null
+    readonly property bool textDraftDirty: textDraft !== null && inlineText.text.trim() !== textDraft.original
     property var draft: null
     property real dragX: 0
     property real dragY: 0
     readonly property real unit: document.page ? width / document.page.width : 1
     readonly property bool available: document.preview !== "" && !document.busy
-    signal textPlacementRequested(real x, real y)
-    signal textSelected()
+    signal textEditingStarted()
+
+    function fontFamily(font) {
+        return font === "serif" ? "Nimbus Roman" : font === "mono" ? "Nimbus Mono PS" : "Nimbus Sans";
+    }
+    function beginText(index, x, y) {
+        if (!available) return;
+        finishText(true);
+        var mark = index >= 0 ? document.marks[index] : null;
+        if (mark && mark.kind !== "text") return;
+        document.selected = index;
+        textDraft = {index: index, x: mark ? mark.x : x, y: mark ? mark.y : y, original: mark ? mark.text : ""};
+        inlineText.text = mark ? mark.text : "";
+        textEditingStarted();
+        inlineText.forceActiveFocus();
+        inlineText.selectAll();
+    }
+    function finishText(save) {
+        if (!textDraft) return;
+        var draft = textDraft;
+        var value = inlineText.text.trim();
+        textDraft = null;
+        if (!save || document.busy || !document.page) return;
+        if (draft.index < 0) {
+            if (value) document.addMark(document.textMark(draft.x, draft.y, value, textSize, inkColor, textFont));
+        } else if (!value) {
+            document.selected = draft.index;
+            document.removeMark();
+        } else document.updateText(draft.index, value, textSize, textFont, inkColor);
+    }
 
     function bounds(mark) {
         if (mark.kind !== "ink") return {x: mark.x, y: mark.y, w: mark.w || 0.15, h: mark.h || 0.04};
@@ -48,9 +81,11 @@ Item {
             }
             ctx.stroke();
         } else if (mark.kind === "text") {
-            ctx.font = (mark.size * unit) + "px 'Nimbus Sans'";
+            ctx.font = (mark.size * unit) + "px '" + fontFamily(mark.font) + "'";
             ctx.textBaseline = "alphabetic";
-            ctx.fillText(mark.text, mark.x * width, mark.y * height + mark.size * unit);
+            mark.text.split("\n").forEach(function(line, i) {
+                ctx.fillText(line, mark.x * width, mark.y * height + mark.size * unit * (1 + i * 1.2));
+            });
         } else if (mark.kind === "highlight") {
             ctx.globalAlpha = 0.3;
             ctx.globalCompositeOperation = "multiply";
@@ -83,6 +118,7 @@ Item {
             ctx.reset();
             if (!root.document.page) return;
             root.document.marks.forEach(function(mark, index) {
+                if (root.textDraft && root.textDraft.index === index) return;
                 if (mark.page === root.document.page.number) root.paintMark(ctx, mark, index === root.document.selected);
             });
             if (root.draft) root.paintMark(ctx, root.draft, false);
@@ -91,13 +127,14 @@ Item {
     Connections {
         target: root.document
         function onMarksChanged() { canvas.requestPaint(); }
-        function onPageChanged() { root.draft = null; canvas.requestPaint(); }
+        function onPageChanged() { root.finishText(false); root.draft = null; canvas.requestPaint(); }
         function onSelectedChanged() { canvas.requestPaint(); }
     }
     onWidthChanged: canvas.requestPaint()
     onHeightChanged: canvas.requestPaint()
-    onToolChanged: canvas.requestPaint()
+    onToolChanged: { if (tool !== "select") finishText(true); canvas.requestPaint(); }
     onDraftChanged: canvas.requestPaint()
+    onTextDraftChanged: canvas.requestPaint()
     MouseArea {
         objectName: "pageInput"
         anchors.fill: parent
@@ -107,6 +144,7 @@ Item {
         property real startY: 0
         function position(mouse) { return [Math.max(0, Math.min(1, mouse.x / width)), Math.max(0, Math.min(1, mouse.y / height))]; }
         onPressed: function(mouse) {
+            root.finishText(true);
             var p = position(mouse);
             startX = p[0]; startY = p[1];
             if (root.tool === "select") {
@@ -116,9 +154,8 @@ Item {
             if (root.tool === "text") {
                 var index = root.hit(p[0], p[1]);
                 if (index >= 0 && root.document.marks[index].kind === "text") {
-                    root.document.selected = index;
-                    root.textSelected();
-                } else root.textPlacementRequested(p[0], p[1]);
+                    root.beginText(index, 0, 0);
+                } else root.beginText(-1, p[0], p[1]);
                 return;
             }
             root.draft = {kind: root.tool, color: root.inkColor, size: root.strokeSize,
@@ -146,5 +183,50 @@ Item {
             canvas.requestPaint();
         }
         onCanceled: { root.dragX = 0; root.dragY = 0; root.draft = null; }
+        onDoubleClicked: function(mouse) {
+            var p = position(mouse);
+            var index = root.hit(p[0], p[1]);
+            if (root.tool === "select" && index >= 0 && root.document.marks[index].kind === "text") root.beginText(index, 0, 0);
+        }
+    }
+    TextEdit {
+        id: inlineText
+        objectName: "inlineTextEditor"
+        visible: root.textEditing
+        enabled: !root.document.busy
+        x: root.textDraft ? root.textDraft.x * root.width : 0
+        y: root.textDraft ? root.textDraft.y * root.height + root.textSize * root.unit - baselineOffset : 0
+        width: Math.max(80, contentWidth + 8)
+        height: Math.max(font.pixelSize * 1.3, contentHeight)
+        font.family: root.fontFamily(root.textFont)
+        font.pixelSize: Math.max(1, root.textSize * root.unit)
+        color: root.inkColor
+        textFormat: TextEdit.PlainText
+        wrapMode: TextEdit.NoWrap
+        selectByMouse: true
+        selectionColor: "#b6d4ff"
+        selectedTextColor: root.inkColor
+        onActiveFocusChanged: if (!activeFocus) root.finishText(true)
+        Keys.onPressed: function(event) {
+            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ShiftModifier)) {
+                root.finishText(true); event.accepted = true;
+            } else if (event.key === Qt.Key_Escape) {
+                root.finishText(false); event.accepted = true;
+            }
+        }
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -3
+            color: "transparent"
+            border.color: "#4279c2"
+            border.width: 1
+            z: -1
+        }
+        Text {
+            visible: !inlineText.text
+            text: "Type here…"
+            color: "#777777"
+            font: inlineText.font
+        }
     }
 }

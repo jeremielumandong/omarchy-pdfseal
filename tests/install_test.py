@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+import tempfile
+import json
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location(
@@ -12,6 +14,23 @@ spec.loader.exec_module(installer)
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_changed_qml_gets_new_runtime_url_without_version_bump(self):
+        with tempfile.TemporaryDirectory() as folder:
+            staged = Path(folder)
+            (staged / 'manifest.json').write_text(json.dumps({'version': '1.0.0', 'entryPoints': {'barWidget': 'Widget.qml'}}))
+            (staged / 'Widget.qml').write_text('Item {}')
+            (staged / 'bin').mkdir()
+            (staged / 'bin/pdfseal-worker').write_bytes(b'worker')
+            first = installer.stage_runtime(staged)
+            (staged / 'Widget.qml').write_text('Item { property bool fixed: true }')
+            second = installer.stage_runtime(staged)
+            self.assertNotEqual(first, second)
+            self.assertEqual((second / 'Widget.qml').read_text(), (staged / 'Widget.qml').read_text())
+            self.assertEqual((second / 'bin/pdfseal-worker').read_bytes(), b'worker')
+            manifest = json.loads((staged / 'manifest.json').read_text())
+            self.assertEqual(manifest['entryPoints']['barWidget'], second.name + '/Widget.qml')
+            self.assertEqual(manifest['version'], '1.0.0')
+
     def test_waits_for_discovery_before_enabling(self):
         responses = [
             SimpleNamespace(returncode=0),

@@ -48,6 +48,8 @@ struct Mark {
     #[serde(default)]
     text: String,
     #[serde(default)]
+    font: String,
+    #[serde(default)]
     points: Vec<[f32; 2]>,
 }
 
@@ -383,19 +385,24 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
             }
             "text" => {
                 let (encoded, _, had_errors) = WINDOWS_1252.encode(&mark.text);
-                if had_errors || mark.text.contains(['\n', '\r']) {
-                    return Err(
-                        "Text currently supports a single line of Western European characters"
-                            .into(),
-                    );
+                if had_errors || mark.text.contains('\r') {
+                    return Err("Text currently supports Western European characters".into());
                 }
                 operations.push(op("BT", &[]));
-                operations.push(Operation::new("Tf", vec!["Text".into(), mark.size.into()]));
+                let font = match mark.font.as_str() {
+                    "" | "sans" => "Text",
+                    "serif" => "Serif",
+                    "mono" => "Mono",
+                    _ => return Err("Unknown text font".into()),
+                };
+                operations.push(Operation::new("Tf", vec![font.into(), mark.size.into()]));
                 operations.push(op("Td", &[x, y - mark.size]));
-                operations.push(Operation::new(
-                    "Tj",
-                    vec![Object::string_literal(encoded.as_ref())],
-                ));
+                for (index, line) in encoded.split(|byte| *byte == b'\n').enumerate() {
+                    if index > 0 {
+                        operations.push(op("Td", &[0.0, -mark.size * 1.2]));
+                    }
+                    operations.push(Operation::new("Tj", vec![Object::string_literal(line)]));
+                }
                 operations.push(op("ET", &[]));
             }
             _ => return Err("Unknown annotation type".into()),
@@ -405,12 +412,18 @@ fn annotate(doc: &mut Document, page: &Page, marks: &[&Mark]) -> Result<()> {
     let font = doc.add_object(dictionary! {
         "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding"
     });
+    let serif = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Times-Roman", "Encoding" => "WinAnsiEncoding"
+    });
+    let mono = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier", "Encoding" => "WinAnsiEncoding"
+    });
     let form = Stream::new(
         dictionary! {
             "Type" => "XObject", "Subtype" => "Form", "FormType" => 1,
             "BBox" => vec![0.into(), 0.into(), page.width.into(), page.height.into()],
             "Resources" => dictionary! {
-                "Font" => dictionary! { "Text" => font },
+                "Font" => dictionary! { "Text" => font, "Serif" => serif, "Mono" => mono },
                 "ExtGState" => dictionary! {
                     "Highlight" => dictionary! { "Type" => "ExtGState", "ca" => 0.3, "BM" => "Multiply" }
                 }
@@ -568,7 +581,7 @@ mod tests {
         session.export(&json!({
             "path": output, "pages": [{"number": 2, "rotation": 90}, {"number": 1}],
             "compress": true, "marks": [
-                {"page": 1, "kind": "text", "color": "#153355", "size": 18, "x": 0.2, "y": 0.2, "text": "Signed by PDFSeal"},
+                {"page": 1, "kind": "text", "font": "serif", "color": "#153355", "size": 18, "x": 0.2, "y": 0.2, "text": "Signed by PDFSeal\nSecond line"},
                 {"page": 1, "kind": "ink", "color": "#153355", "points": [[0.1,0.5],[0.3,0.55],[0.5,0.4]]},
                 {"page": 1, "kind": "highlight", "color": "#ffcc00", "x":0.1,"y":0.3,"w":0.4,"h":0.1}
             ]
@@ -586,6 +599,9 @@ mod tests {
         let text = String::from_utf8_lossy(&text_output.stdout);
         assert!(text.contains("Original content"), "{text}");
         assert!(text.contains("Signed by PDFSeal"), "{text}");
+        assert!(text.contains("Second line"), "{text}");
+        let fonts = Command::new("pdffonts").arg(&output).output().unwrap();
+        assert!(String::from_utf8_lossy(&fonts.stdout).contains("Times-Roman"));
         assert!(
             Command::new("qpdf")
                 .arg("--check")

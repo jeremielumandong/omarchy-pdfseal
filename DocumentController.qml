@@ -78,21 +78,26 @@ Item {
         marks = marks.filter(function(mark, index) { return index !== root.selected; });
         selected = -1;
     }
-    function textMark(x, y, text, size, color) {
-        return {kind: "text", color: color, size: size, text: text, x: x, y: y,
-            w: Math.min(1 - x, Math.max(0.01, text.length * size * 0.56 / page.width)),
-            h: Math.min(1 - y, size * 1.3 / page.height)};
+    function textMark(x, y, text, size, color, font) {
+        var lines = text.split("\n");
+        var length = Math.max.apply(null, lines.map(function(line) { return line.length; }));
+        return {kind: "text", color: color, font: font || "sans", size: size, text: text, x: x, y: y,
+            w: Math.min(1 - x, Math.max(0.01, length * size * 0.6 / page.width)),
+            h: Math.min(1 - y, size * (1.3 + (lines.length - 1) * 1.2) / page.height)};
     }
-    function updateSelectedText(text, size) {
-        var mark = selectedMark;
+    function updateText(index, text, size, font, color) {
+        var mark = marks[index];
         if (busy || !page || !mark || mark.kind !== "text" || mark.page !== page.number) return;
         size = Math.max(8, Math.min(72, size));
-        if (mark.text === text && mark.size === size) return;
+        font = font || mark.font || "sans";
+        color = color || mark.color;
+        if (mark.text === text && mark.size === size && (mark.font || "sans") === font && mark.color === color) return;
         var next = marks.slice();
-        next[selected] = Object.assign({}, mark, textMark(mark.x, mark.y, text, size, mark.color));
+        next[index] = Object.assign({}, mark, textMark(mark.x, mark.y, text, size, color, font));
         remember();
         marks = next;
     }
+    function updateSelectedText(text, size, font, color) { updateText(selected, text, size, font, color); }
     function moveMark(index, dx, dy) {
         if (busy || index < 0 || (!dx && !dy)) return;
         var next = JSON.parse(JSON.stringify(marks));

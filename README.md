@@ -22,7 +22,7 @@ annotation workflow. It does **not** yet include certificate-based digital
 seals, recipient fields and handoff packages, OCR, true redaction, image
 signatures, merging, or Office/image conversion. Drawn signatures are visual
 annotations, not cryptographic signatures. Existing digital signatures do
-not survive editing. Text supports single-line Windows-1252 (Western European)
+not survive editing. Text supports Windows-1252 (Western European)
 characters.
 
 ## Install
@@ -57,9 +57,12 @@ tool, and draw or click on the page. **Select** lets you drag an existing mark.
 Clicking the bar button again focuses the existing editor, including from
 another workspace, while keeping your document and edits open.
 
-For text, choose **Text**, click where it belongs, then type in the sidebar.
-Click existing text with **Text** or **Select** to edit it; **A− / A+** changes
-the selected text's size immediately. Text and size changes support undo/redo.
+For text, choose **Text**, click where it belongs, and type directly on the
+page. The tool returns to **Select**. Double-click existing text (or click
+**Edit selected text**) to change its value. **Enter** or clicking away saves;
+**Escape** cancels; **Shift+Enter** adds a line. Empty text is discarded.
+Choose **Sans / Serif / Mono**, ink color, and **A− / A+** in the sidebar.
+Each finished text edit is a single undo step.
 
 **Export PDF** saves a new copy. An empty export password creates an
 unencrypted file, including when the input was encrypted.
