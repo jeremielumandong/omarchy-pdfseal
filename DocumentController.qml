@@ -23,6 +23,8 @@ Item {
     property int previewPage: 0
     property int previewPixels: 0
     property int serial: 0
+    property string openingPath: ""
+    signal passwordNeeded(string path)
     property var pendingOpen: null
     property var pendingImage: null
     property var savedSignatures: []
@@ -183,6 +185,7 @@ Item {
     }
     function openDocument(path, password) {
         if (!path || busy) return;
+        openingPath = path;
         pendingOpen = { path: path, password: password || "" };
         error = "";
         if (!worker.running) {
@@ -227,6 +230,12 @@ Item {
         if (message.id !== serial) return;
         operation = "";
         if (!message.ok) {
+            if (message.op === "open" && message.passwordRequired) {
+                error = "";
+                status = "This PDF requires its password.";
+                passwordNeeded(openingPath);
+                return;
+            }
             error = message.error || "PDF operation failed.";
             status = "Could not complete the operation.";
             return;

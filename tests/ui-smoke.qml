@@ -6,6 +6,7 @@ import Quickshell.Hyprland
 import qs.Commons
 
 ShellRoot {
+    property var touches: null
     property int phase: 0
     onPhaseChanged: console.log("Regression phase " + phase)
     property var focusTarget: null
@@ -49,6 +50,9 @@ ShellRoot {
         property string fontFamily: "monospace"
         property color barForeground: "white"
         property color urgent: "red"
+        property var activePopout: null
+        function requestPopout(owner) { activePopout=owner; }
+        function releasePopout(owner) { activePopout=null; }
         function hideTooltip(item) {}
         function showTooltip(item, text) {}
     }
@@ -56,7 +60,7 @@ ShellRoot {
         visible: true
         implicitWidth: 160
         implicitHeight: 40
-        Widget { id: widget; bar: testBar }
+        Widget { id: widget; bar: testBar; function persistDisplay(mode) { settings={displayMode:mode}; } }
     }
     Editor { id: nativeEditor }
     Timer {
@@ -86,7 +90,7 @@ ShellRoot {
             nativeEditor.open();
             Color.background = "#112233";
             Color.foreground = "#ddeeff";
-            nativeEditor.document.openDocument(testDir + "/input.pdf", "");
+            nativeEditor.openedPdf(testDir + "/input.pdf");
             check.start();
         }
     }
@@ -100,6 +104,7 @@ ShellRoot {
             if (phase === 0 && doc.preview && doc.operation === "") {
                 if (nativeEditor.themeBackground.toString() !== "#112233" || nativeEditor.themeForeground.toString() !== "#ddeeff")
                     throw new Error("Theme did not propagate");
+                if (nativeEditor.openOptions) throw new Error("Plain PDF showed a password prompt");
                 if (doc.pages.length !== 2) throw new Error("PDF did not load");
                 doc.addMark({kind:"ink",color:"#153355",size:2,points:[[0.1,0.5],[0.3,0.4],[0.5,0.6]]});
                 nativeEditor.tool = "text";
@@ -199,6 +204,31 @@ ShellRoot {
                 input.keyClick(Qt.Key_Delete,Qt.NoModifier,0);
                 if (doc.marks.length!==3 || doc.marks.some(function(m){return m.kind==="text";})) throw new Error("Delete did not remove selected text");
                 doc.undo();
+                phase=14;
+            } else if (phase===14) {
+                var viewport=control("pdfViewport");
+                input.mouseWheel(viewport,viewport.width/2,viewport.height/2,Qt.NoButton,Qt.ControlModifier,0,120,0);
+                if (doc.zoom<=1) throw new Error("Ctrl-wheel did not zoom PDF");
+                viewport.zoomAt(1,viewport.width/2,viewport.height/2);
+                touches=input.touchEvent(viewport);
+                touches.press(0,viewport,viewport.width/2-30,viewport.height/2);
+                touches.press(1,viewport,viewport.width/2+30,viewport.height/2);
+                touches.commit();
+                phase=15;
+            } else if (phase===15 || phase===16) {
+                var viewport=control("pdfViewport");
+                var distance=phase===15 ? 60 : 100;
+                touches.move(0,viewport,viewport.width/2-distance,viewport.height/2);
+                touches.move(1,viewport,viewport.width/2+distance,viewport.height/2);
+                touches.commit();
+                phase++;
+            } else if (phase===17) {
+                if (doc.zoom<=1.1) throw new Error("Pinch did not zoom PDF");
+                var viewport=control("pdfViewport");
+                touches.release(0,viewport,viewport.width/2-100,viewport.height/2);
+                touches.release(1,viewport,viewport.width/2+100,viewport.height/2);
+                touches.commit();
+                viewport.zoomAt(1,viewport.width/2,viewport.height/2);
                 phase=4;
             } else if (phase === 4) {
                 focusTarget = Hyprland.toplevels.values.find(function(t) { return t.title === "• input.pdf — PDFSeal"; });
@@ -233,14 +263,37 @@ ShellRoot {
                         }
                     }
                 }
+                nativeEditor.openedPdf(testDir+"/encrypted.pdf");
+                phase=18;
+            } else if (phase===18 && nativeEditor.openOptions) {
+                if (!doc.loaded || doc.fileName!=="input.pdf") throw new Error("Password prompt discarded open PDF");
+                nativeEditor.openOptions=false;
+                doc.openDocument(testDir+"/encrypted.pdf","test-password");
+                phase=19;
+            } else if (phase===19 && doc.fileName==="encrypted.pdf" && doc.operation==="") {
+                if (nativeEditor.openOptions) throw new Error("Password prompt remained after correct password");
                 nativeEditor.close();
-                phase = 2;
+                phase=2;
             } else if (phase === 2 && !doc.ready && !doc.loaded) {
+                input.mouseClick(widget,widget.width/2,widget.height/2,Qt.RightButton,Qt.NoModifier,0);
+                phase=20;
+            } else if (phase===20 || phase===21) {
+                var menu=null;
+                for (var i=0;i<widget.data.length;i++) if (widget.data[i].objectName==="pdfsealDisplayMenu") menu=widget.data[i];
+                if (!menu || !menu.open) throw new Error("Right-click did not open display menu");
+                var mode=phase===20 ? "icon" : "text";
+                var choice=findItem(menu.contentItem[0],"display-"+mode);
+                if (!choice) throw new Error("Missing display menu choice");
+                click(choice,20,10);
+                if (widget.displayMode!==mode || menu.open) throw new Error("Display menu selection did not apply");
+                if (phase===20) {widget.toggleDisplayMenu();phase=21;return;}
+                phase=22;
+            } else if (phase===22) {
                 Hyprland.dispatch(Hyprland.usingLua
                     ? 'hl.dsp.focus({ workspace = ' + JSON.stringify("name:" + previousWorkspace) + ' })'
                     : "workspace name:" + previousWorkspace);
                 if (previousToplevel) previousToplevel.activate();
-                console.log("PASS: PDFSeal widget, icon/text modes, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
+                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, pinch/wheel zoom, password-only-when-required, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
         }

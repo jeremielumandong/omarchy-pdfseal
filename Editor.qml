@@ -45,6 +45,7 @@ Item {
         }
         return false;
     }
+    function openedPdf(path) { pickedPath=path; document.openDocument(path, ""); }
     function open() {
         opened = true;
         if (!activateWindow()) {
@@ -73,6 +74,7 @@ Item {
     }
     Connections {
         target: document
+        function onPasswordNeeded(path) { root.pickedPath=path; root.openOptions=true; }
         function onImagePrepared(asset) {
             document.addImage(asset);
             if (root.imageLabel !== "Stamp" && root.imageLabel !== "Saved")
@@ -112,8 +114,7 @@ Item {
         title: "Open a PDF"
         nameFilters: ["PDF documents (*.pdf)"]
         onAccepted: {
-            root.pickedPath = document.filePath(selectedFile);
-            root.openOptions = true;
+            root.openedPdf(document.filePath(selectedFile));
         }
     }
     FileDialog {
@@ -324,9 +325,9 @@ Item {
                         Row {
                             id: zoomControls
                             spacing: Style.space(5)
-                            Button { text: "−"; onClicked: document.zoom = Math.max(0.5, document.zoom - 0.25) }
+                            Button { text: "−"; onClicked: viewport.zoomAt(document.zoom-0.25,viewport.width/2,viewport.height/2) }
                             Label { text: Math.round(document.zoom * 100) + "%"; anchors.verticalCenter: parent.verticalCenter }
-                            Button { text: "+"; onClicked: document.zoom = Math.min(3, document.zoom + 0.25) }
+                            Button { text: "+"; onClicked: viewport.zoomAt(document.zoom+0.25,viewport.width/2,viewport.height/2) }
                         }
                     }
                     Rectangle {
@@ -343,6 +344,37 @@ Item {
                         }
                         Flickable {
                             id: viewport
+                            objectName: "pdfViewport"
+                            function zoomAt(value, px, py) {
+                                if (!document.loaded || document.busy) return;
+                                var next=Math.max(0.5,Math.min(5,value));
+                                var ratio=next/document.zoom;
+                                var pageX=(contentX+px-pageFrame.x)*ratio;
+                                var pageY=(contentY+py-pageFrame.y)*ratio;
+                                document.zoom=next;
+                                contentX=Math.max(0,Math.min(contentWidth-width,pageFrame.x+pageX-px));
+                                contentY=Math.max(0,Math.min(contentHeight-height,pageFrame.y+pageY-py));
+                            }
+                            PinchHandler {
+                                id: pdfPinch
+                                objectName: "pdfPinch"
+                                target: null
+                                enabled: document.loaded && !document.busy
+                                acceptedDevices: PointerDevice.TouchPad | PointerDevice.TouchScreen
+                                property real startingZoom: 1
+                                onActiveChanged: if (active) { pageCanvas.finishText(true); startingZoom=document.zoom; viewport.cancelFlick(); }
+                                onActiveScaleChanged: if (active) viewport.zoomAt(startingZoom*activeScale,centroid.position.x,centroid.position.y)
+                            }
+                            WheelHandler {
+                                target: null
+                                acceptedModifiers: Qt.ControlModifier
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                onWheel: function(event) {
+                                    var delta=event.angleDelta.y || event.pixelDelta.y;
+                                    viewport.zoomAt(document.zoom*Math.exp(delta/600),event.x,event.y);
+                                    event.accepted=true;
+                                }
+                            }
                             anchors.fill: parent
                             anchors.margins: Style.space(16)
                             clip: true
@@ -413,7 +445,7 @@ Item {
                         }
                         Label {
                             width: parent.width
-                            text: root.confirmDiscard ? "Your original file is unchanged. Export first to keep your edits." : root.openOptions ? "If this PDF is encrypted, enter its password." : "Save a new copy with your signatures, annotations and page changes."
+                            text: root.confirmDiscard ? "Your original file is unchanged. Export first to keep your edits." : root.openOptions ? "This PDF requires a password to open." : "Save a new copy with your signatures, annotations and page changes."
                         }
                         TextField { id: openPassword; width: parent.width; visible: root.openOptions; password: true; placeholderText: "Password (optional)" }
                         TextField { id: exportPassword; width: parent.width; visible: root.exportOptions; password: true; placeholderText: "Protect with a password (optional)" }

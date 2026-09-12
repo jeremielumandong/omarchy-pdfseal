@@ -84,8 +84,8 @@ omarchy bar move arkane.pdfseal --section right
 omarchy-shell shell summon arkane.pdfseal '{}'
 ```
 
-**Right-click PDFSeal in the bar** to cycle through **Icon and text** (default),
-**Icon only**, and **Text only**. Your choice is saved in Omarchy's bar settings.
+**Right-click PDFSeal in the bar** to open the display menu and choose
+**Icon only** or **Text only**. Your choice is saved in Omarchy's bar settings.
 The document/signature icon follows the bar's
 theme colors. Vertical bars use the compact icon. You can also switch with:
 
@@ -165,3 +165,5 @@ python3 ~/.config/omarchy/plugins/arkane.pdfseal/scripts/uninstall.py
 ```
 
 Exported PDFs and installation backups are preserved.
+
+Pinch the PDF to zoom, or use Ctrl+mouse wheel. Clicking an object gives it keyboard focus: Delete or Backspace removes it, and Undo restores it. Normal PDFs open immediately; the password dialog appears only when the PDF requires a password.

@@ -10,6 +10,15 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tempfile::{NamedTempFile, TempDir};
 
+#[derive(Debug)]
+struct PasswordRequired;
+impl std::fmt::Display for PasswordRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("This PDF requires a valid password")
+    }
+}
+impl std::error::Error for PasswordRequired {}
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 mod images;
 
@@ -86,6 +95,12 @@ fn qpdf(job: Value) -> Result<()> {
     let output = child.wait_with_output()?;
     write_result?;
     if !output.status.success() && output.status.code() != Some(3) {
+        if String::from_utf8_lossy(&output.stderr)
+            .to_lowercase()
+            .contains("invalid password")
+        {
+            return Err(Box::new(PasswordRequired));
+        }
         return Err(format!("qpdf: {}", String::from_utf8_lossy(&output.stderr).trim()).into());
     }
     Ok(())
@@ -542,7 +557,7 @@ fn main() -> Result<()> {
                     json!({ "id": request["id"], "op": request["op"], "ok": true, "result": result })
                 }
                 Err(error) => {
-                    json!({ "id": request["id"], "op": request["op"], "ok": false, "error": error.to_string() })
+                    json!({ "id": request["id"], "op": request["op"], "ok": false, "error": error.to_string(), "passwordRequired": error.downcast_ref::<PasswordRequired>().is_some() })
                 }
             },
             Err(_) => json!({ "ok": false, "error": "Invalid JSON request" }),

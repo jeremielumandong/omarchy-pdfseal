@@ -12,15 +12,21 @@ BarWidget {
     readonly property bool showText: !vertical && displayMode !== "icon"
     // The idle bar widget has no editor and no PDF worker.
     function open() {
+        displayMenu.open = false;
         editor.active = true;
         if (editor.item) editor.item.open();
     }
     function close() { if (editor.item) editor.item.close(); }
     function toggle() { if (opened) close(); else open(); }
-    function cycleDisplay() {
-        var next = displayMode === "both" ? "icon" : displayMode === "icon" ? "text" : "both";
-        Quickshell.execDetached(["omarchy", "bar", "set", moduleName, "displayMode", next]);
+    function persistDisplay(mode) {
+        Quickshell.execDetached(["omarchy", "bar", "set", moduleName, "displayMode", mode]);
     }
+    function setDisplayMode(mode) {
+        if (mode !== "icon" && mode !== "text") return;
+        displayMenu.open = false;
+        persistDisplay(mode);
+    }
+    function toggleDisplayMenu() { displayMenu.open = !displayMenu.open; }
     implicitWidth: button.implicitWidth
     implicitHeight: button.implicitHeight
     WidgetButton {
@@ -31,12 +37,12 @@ BarWidget {
         labelVisible: false
         fixedWidth: root.vertical ? root.barSize : content.implicitWidth + scaledHorizontalMargin * 2
         fixedHeight: root.vertical ? icon.height + scaledVerticalPadding * 2 : root.barSize
-        tooltipText: "PDFSeal · Click to open · Right-click to switch icon / text"
+        tooltipText: "PDFSeal · Click to open · Right-click for text / icon menu"
         active: root.opened
         Accessible.name: "PDFSeal"
         onPressed: function(buttonCode) {
             if (buttonCode === Qt.LeftButton) root.open();
-            else if (buttonCode === Qt.RightButton) root.cycleDisplay();
+            else if (buttonCode === Qt.RightButton) root.toggleDisplayMenu();
         }
         Row {
             id: content
@@ -83,6 +89,21 @@ BarWidget {
                 color: icon.ink
                 renderType: Text.NativeRendering
             }
+        }
+    }
+    PopupCard {
+        id: displayMenu
+        objectName: "pdfsealDisplayMenu"
+        anchorItem: button
+        bar: root.bar
+        contentWidth: Style.space(210)
+        contentHeight: fittedContentHeight(menuItems.implicitHeight)
+        Column {
+            id: menuItems
+            width: parent.width
+            spacing: Style.space(6)
+            Button { objectName:"display-text"; width:parent.width; text:"Text only"; selected:root.displayMode==="text"; onClicked:root.setDisplayMode("text") }
+            Button { objectName:"display-icon"; width:parent.width; text:"Icon only"; selected:root.displayMode==="icon"; onClicked:root.setDisplayMode("icon") }
         }
     }
     Loader {
