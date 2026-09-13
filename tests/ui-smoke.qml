@@ -8,6 +8,7 @@ import qs.Commons
 ShellRoot {
     property int colorHistory: 0
     property var touches: null
+    property var pinchCenter: null
     property int phase: 0
     property bool checking:false
     property bool readerFitted:false
@@ -256,23 +257,27 @@ ShellRoot {
                 input.mouseWheel(viewport,viewport.width/2,viewport.height/2,Qt.NoButton,Qt.ControlModifier,0,120,0);
                 if (doc.zoom<=previousZoom) throw new Error("Ctrl-wheel did not zoom PDF");
                 viewport.zoomAt(1,viewport.width/2,viewport.height/2);
+                // Use a known blank area. On narrow windows the viewport's
+                // center can land on the ink object, which owns object drags.
+                var page=control("pageInput");
+                pinchCenter=page.mapToItem(viewport,page.width*0.65,page.height*0.2);
                 touches=input.touchEvent(viewport);
-                touches.press(0,viewport,viewport.width/2-30,viewport.height/2);
-                touches.press(1,viewport,viewport.width/2+30,viewport.height/2);
+                touches.press(0,viewport,pinchCenter.x-30,pinchCenter.y);
+                touches.press(1,viewport,pinchCenter.x+30,pinchCenter.y);
                 touches.commit();
                 phase=15;
             } else if (phase===15 || phase===16) {
                 var viewport=control("pdfViewport");
                 var distance=phase===15 ? 60 : 100;
-                touches.move(0,viewport,viewport.width/2-distance,viewport.height/2);
-                touches.move(1,viewport,viewport.width/2+distance,viewport.height/2);
+                touches.move(0,viewport,pinchCenter.x-distance,pinchCenter.y);
+                touches.move(1,viewport,pinchCenter.x+distance,pinchCenter.y);
                 touches.commit();
                 phase++;
             } else if (phase===17) {
-                if (doc.zoom<=1.1) throw new Error("Pinch did not zoom PDF: zoom="+doc.zoom+" active="+control("pdfPinch").active+" enabled="+control("pdfPinch").enabled);
+                if (doc.zoom<=1.1) throw new Error("Pinch did not zoom PDF: zoom="+doc.zoom);
                 var viewport=control("pdfViewport");
-                touches.release(0,viewport,viewport.width/2-100,viewport.height/2);
-                touches.release(1,viewport,viewport.width/2+100,viewport.height/2);
+                touches.release(0,viewport,pinchCenter.x-100,pinchCenter.y);
+                touches.release(1,viewport,pinchCenter.x+100,pinchCenter.y);
                 touches.commit();
                 viewport.zoomAt(1,viewport.width/2,viewport.height/2);
                 phase=4;

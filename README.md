@@ -183,6 +183,7 @@ cargo test --locked --manifest-path native/Cargo.toml
 bash scripts/build.sh
 bash tests/ui-smoke.sh
 bash tests/reader-smoke.sh
+bash tests/stamp-smoke.sh
 python3 tests/geometry-smoke.py
 python3 tests/jobs-smoke.py
 python3 -m unittest discover -s tests -p '*_test.py'

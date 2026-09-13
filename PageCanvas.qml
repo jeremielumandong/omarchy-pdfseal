@@ -109,7 +109,16 @@ Item {
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         if (mark.kind === "image") {
-            if (canvas.isImageLoaded(mark.dataUrl)) ctx.drawImage(mark.dataUrl, mark.x * width, mark.y * height, mark.w * width, mark.h * height);
+            if (canvas.isImageLoaded(mark.dataUrl)) {
+                // Scale the painter, not drawImage's destination rectangle:
+                // Qt's size-taking overload pre-resizes the bitmap and can
+                // crop its right/bottom edges in the high-DPI canvas path.
+                var size=canvas.imageSizes[mark.dataUrl];
+                if(!size){var pixels=ctx.createImageData(mark.dataUrl);size={width:pixels.width,height:pixels.height};canvas.imageSizes[mark.dataUrl]=size;}
+                ctx.translate(mark.x*width,mark.y*height);
+                ctx.scale(mark.w*width/size.width,mark.h*height/size.height);
+                ctx.drawImage(mark.dataUrl,0,0);
+            }
             else canvas.loadImage(mark.dataUrl);
         } else if (mark.kind === "ink") {
             ctx.beginPath();
@@ -163,6 +172,9 @@ Item {
     }
     Canvas {
         id: canvas
+        property var imageSizes:({})
+        smooth:true
+        antialiasing:true
         anchors.fill: parent
         onImageLoaded: requestPaint()
         onPaint: {
