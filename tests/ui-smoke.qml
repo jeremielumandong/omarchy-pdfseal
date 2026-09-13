@@ -10,6 +10,7 @@ ShellRoot {
     property var touches: null
     property var pinchCenter: null
     property int phase: 0
+    property int displayStep: 0
     property bool checking:false
     property bool readerFitted:false
     property real previousZoom:1
@@ -411,23 +412,32 @@ ShellRoot {
             } else if (phase === 2 && !doc.ready && !doc.loaded) {
                 input.mouseClick(widget,widget.width/2,widget.height/2,Qt.RightButton,Qt.NoModifier,0);
                 phase=20;
-            } else if (phase===20 || phase===21) {
+            } else if (phase===20) {
                 var menu=null;
                 for (var i=0;i<widget.data.length;i++) if (widget.data[i].objectName==="pdfsealDisplayMenu") menu=widget.data[i];
                 if (!menu || !menu.open) throw new Error("Right-click did not open display menu");
-                var mode=phase===20 ? "icon" : "text";
-                var choice=findItem(menu.contentItem[0],"display-"+mode);
+                var choices=[
+                    {name:"label",label:"Hide text",mode:"icon"},
+                    {name:"label",label:"Show text",mode:"both"},
+                    {name:"text",label:"Text only",mode:"text"},
+                    {name:"label",label:"Hide text",mode:"icon"},
+                    {name:"label",label:"Show text",mode:"both"}
+                ];
+                var step=choices[displayStep],mode=step.mode;
+                var choice=findItem(menu.contentItem[0],"display-"+step.name);
                 if (!choice) throw new Error("Missing display menu choice");
+                if (choice.text!==step.label) throw new Error("Display toggle label does not match its action");
                 click(choice,20,10);
                 if (widget.displayMode!==mode || menu.open) throw new Error("Display menu selection did not apply");
-                if (phase===20) {widget.toggleDisplayMenu();phase=21;return;}
+                if (widget.showIcon!==(mode!=="text") || widget.showText!==(mode!=="icon")) throw new Error("Bar icon or text visibility did not follow the menu choice");
+                if (++displayStep<choices.length) {widget.toggleDisplayMenu();return;}
                 phase=22;
             } else if (phase===22) {
                 Hyprland.dispatch(Hyprland.usingLua
                     ? 'hl.dsp.focus({ workspace = ' + JSON.stringify("name:" + previousWorkspace) + ' })'
                     : "workspace name:" + previousWorkspace);
                 if (previousToplevel) previousToplevel.activate();
-                console.log("PASS: PDFSeal widget, explicit icon/text menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, comments, PDF text replacement, page duplication, search, interactive form text/checkbox/radio/dropdown, recipient order, field placement, offline handoff, guided fill and digital seal, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
+                console.log("PASS: PDFSeal widget, show/hide text and text-only menu, live theme bindings, inline text/fonts, typed signature, dated stamp, selection/Delete/undo, draggable color picker/PDF eyedropper, pinch/wheel zoom, password-only-when-required, comments, PDF text replacement, page duplication, search, interactive form text/checkbox/radio/dropdown, recipient order, field placement, offline handoff, guided fill and digital seal, resize/undo, cross-workspace activation, unsaved guard, export and worker shutdown");
                 Qt.quit();
             }
             } catch(error) {console.error("FAIL phase "+phase+": "+error);stop();for(var i=0;i<nativeEditor.data.length;i++){var window=nativeEditor.data[i];if(window.contentItem && window.title!==undefined && String(window.title).endsWith("PDFSeal")){window.contentItem.children[0].grabToImage(function(result){result.saveToFile("/tmp/pdfseal-ui-failure.png");Qt.quit();});return;}}Qt.quit();} finally {checking=false;}

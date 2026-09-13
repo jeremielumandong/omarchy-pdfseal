@@ -22,10 +22,11 @@ BarWidget {
         Quickshell.execDetached(["omarchy", "bar", "set", moduleName, "displayMode", mode]);
     }
     function setDisplayMode(mode) {
-        if (mode !== "icon" && mode !== "text") return;
+        if (mode !== "both" && mode !== "icon" && mode !== "text") return;
         displayMenu.open = false;
         persistDisplay(mode);
     }
+    function toggleText() { setDisplayMode(displayMode === "icon" ? "both" : "icon"); }
     function toggleDisplayMenu() { displayMenu.open = !displayMenu.open; }
     implicitWidth: button.implicitWidth
     implicitHeight: button.implicitHeight
@@ -37,7 +38,7 @@ BarWidget {
         labelVisible: false
         fixedWidth: root.vertical ? root.barSize : content.implicitWidth + scaledHorizontalMargin * 2
         fixedHeight: root.vertical ? icon.height + scaledVerticalPadding * 2 : root.barSize
-        tooltipText: "PDFSeal · Click to open · Right-click for text / icon menu"
+        tooltipText: "PDFSeal · Click to open · Right-click to show or hide text"
         active: root.opened
         Accessible.name: "PDFSeal"
         onPressed: function(buttonCode) {
@@ -102,8 +103,15 @@ BarWidget {
             id: menuItems
             width: parent.width
             spacing: Style.space(6)
+            Button {
+                objectName:"display-label"
+                width:parent.width
+                text:root.displayMode==="icon" ? "Show text" : "Hide text"
+                tooltipText:root.vertical ? "Vertical bars always use the icon." : "Show or hide the PDFSeal label beside its icon."
+                enabled:!root.vertical
+                onClicked:root.toggleText()
+            }
             Button { objectName:"display-text"; width:parent.width; text:"Text only"; selected:root.displayMode==="text"; onClicked:root.setDisplayMode("text") }
-            Button { objectName:"display-icon"; width:parent.width; text:"Icon only"; selected:root.displayMode==="icon"; onClicked:root.setDisplayMode("icon") }
         }
     }
     Loader {

@@ -15,7 +15,7 @@
     "defaults": { "displayMode": "both" },
     "schema": [{
       "key": "displayMode", "type": "enum", "label": "Bar display",
-      "description": "both: icon and text; icon: icon only; text: text only. Right-click the widget to choose icon only or text only.",
+      "description": "both: icon and text; icon: icon only; text: text only. Right-click PDFSeal to show or hide its text label, or choose text only.",
       "options": ["both", "icon", "text"], "defaultValue": "both"
     }]
   }

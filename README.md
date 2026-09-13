@@ -91,8 +91,9 @@ omarchy bar move arkane.pdfseal --section right
 omarchy-shell shell summon arkane.pdfseal '{}'
 ```
 
-**Right-click PDFSeal in the bar** to open the display menu and choose
-**Icon only** or **Text only**. Your choice is saved in Omarchy's bar settings.
+**Right-click PDFSeal in the desktop bar** and choose **Hide text** for just the
+icon, or **Show text** to restore the label beside the icon. **Text only** is
+also available. Your choice is saved in Omarchy's bar settings.
 The document/signature icon follows the bar's
 theme colors. Vertical bars use the compact icon. You can also switch with:
 
