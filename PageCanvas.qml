@@ -211,12 +211,16 @@ Item {
         objectName: root.currentPage ? "pageInput" : "pageInput-"+(root.pageData ? root.pageData.number : 0)
         anchors.fill: parent
         enabled: root.available && root.tool!=="signing"
-        preventStealing:root.tool!=="select"
+        // Claim only object gestures in Select mode so the reader can still
+        // scroll and pinch when a gesture starts on the page background.
+        preventStealing:root.tool!=="select" || manipulatingMark
         cursorShape: root.tool === "select" ? Qt.ArrowCursor : Qt.CrossCursor
+        property bool manipulatingMark: false
         property real startX: 0
         property real startY: 0
         function position(mouse) { return [Math.max(0, Math.min(1, mouse.x / width)), Math.max(0, Math.min(1, mouse.y / height))]; }
         onPressed: function(mouse) {
+            manipulatingMark = false;
             root.pageActivated(root.pageData.number);
             root.finishText(true);
             root.forceActiveFocus();
@@ -227,10 +231,11 @@ Item {
             }
             if (root.tool === "select") {
                 var selected = root.document.selectedMark;
-                root.resizing = selected && ["image","box","highlight","redact"].indexOf(selected.kind) >= 0
+                root.resizing = selected && selected.page === root.pageData.number && ["image","box","highlight","redact"].indexOf(selected.kind) >= 0
                     && Math.abs(p[0]-selected.x-selected.w)*width < 10 && Math.abs(p[1]-selected.y-selected.h)*height < 10;
-                if (root.resizing) return;
+                if (root.resizing) { manipulatingMark = true; return; }
                 root.document.selected = root.hit(p[0], p[1]);
+                manipulatingMark = root.document.selected >= 0;
                 return;
             }
             if (root.tool==="note") {root.noteRequested(-1,p[0],p[1]);return;}
@@ -254,6 +259,7 @@ Item {
             if (!pressed) return;
             var p = position(mouse);
             if (root.tool === "select") {
+                if (!manipulatingMark) return;
                 root.dragX = p[0] - startX; root.dragY = p[1] - startY;
             } else if (root.draft) {
                 if (root.draft.kind === "ink") root.draft.points.push(p);
@@ -265,16 +271,17 @@ Item {
             canvas.requestPaint();
         }
         onReleased: {
-            if (root.tool === "select") {
+            if (root.tool === "select" && manipulatingMark) {
                 if (root.resizing) root.document.resizeMark(root.document.selected, root.dragX, root.dragY);
                 else root.document.moveMark(root.document.selected, root.dragX, root.dragY);
             }
             else if (root.draft && (root.draft.kind === "ink" ? root.draft.points.length > 1 : root.draft.w > 0.002 && root.draft.h > 0.002))
                 root.document.addMark(root.draft);
             root.dragX = 0; root.dragY = 0; root.draft = null; root.resizing = false;
+            manipulatingMark = false;
             canvas.requestPaint();
         }
-        onCanceled: { root.dragX = 0; root.dragY = 0; root.draft = null; root.resizing = false; }
+        onCanceled: { root.dragX = 0; root.dragY = 0; root.draft = null; root.resizing = false; manipulatingMark = false; canvas.requestPaint(); }
         onDoubleClicked: function(mouse) {
             var p = position(mouse);
             var index = root.hit(p[0], p[1]);

@@ -159,6 +159,8 @@ normal wheel/touchpad scrolling, scrollbars and Page Up / Page Down. It creates
 page canvases only for the visible area and nearby pages, and renders adjacent
 previews ahead of scrolling. The sidebar follows the page in view; selecting a
 page jumps to it. Editing, forms and signing fields stay attached to their page.
+Dragging an object or its resize handle keeps the page still; dragging the page
+background in Select mode scrolls the document.
 
 Previews are capped at 2600 pixels on the longest side. The UI keeps eight
 recent preview references, while the worker caches 12 rendered files. Returning
